@@ -1,0 +1,61 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  OPERATOR_QC
+  ENGINEER
+  QUALITY_MANAGER
+  AUDIT
+  ADMIN
+}
+
+model User {
+  id          Int           @id @default(autoincrement())
+  username    String        @unique
+  password    String
+  name        String
+  role        Role
+  isActive    Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  inspections Inspection[]
+  activityLogs ActivityLog[]
+}
+
+model Part {
+  id          Int          @id @default(autoincrement())
+  partCode    String       @unique
+  partName    String
+  vendorName  String
+  createdAt   DateTime     @default(now())
+  inspections Inspection[]
+}
+
+model Inspection {
+  id                   Int      @id @default(autoincrement())
+  partId               Int
+  operatorId           Int
+  sessionId            String
+  length               Float?
+  width                Float?
+  diameter             Float?
+  status               String   // OK | NG
+  engineerConfigVersion String?
+  quantity             Int      @default(1)
+  timestamp            DateTime @default(now())
+  part                 Part     @relation(fields: [partId], references: [id])
+  operator             User     @relation(fields: [operatorId], references: [id])
+}
+
+model ActivityLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  action    String
+  detail    String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
