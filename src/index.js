@@ -1,8 +1,23 @@
 require('dotenv').config()
 const express = require('express')
 const app     = express()
+const { addClient, removeClient } = require('./sse')
+const auth    = require('./middleware/auth')
 
 app.use(express.json())
+
+// SSE endpoint - frontend subscribe ke sini untuk terima notifikasi NG
+app.get('/api/notifications/stream', auth, (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.flushHeaders()
+
+  res.write('event: connected\ndata: {"message":"Listening for NG alerts"}\n\n')
+  addClient(res)
+
+  req.on('close', () => removeClient(res))
+})
 
 app.use('/api/auth',      require('./routes/auth'))
 app.use('/api/operator',  require('./routes/operator'))

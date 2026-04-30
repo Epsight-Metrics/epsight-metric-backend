@@ -3,6 +3,7 @@ const auth    = require('../middleware/auth')
 const role    = require('../middleware/role')
 const { PrismaClient } = require('@prisma/client')
 const prisma  = new PrismaClient()
+const { addClient, removeClient, broadcast } = require('../sse')
 
 const ALLOWED = ['OPERATOR_QC', 'ENGINEER', 'QUALITY_MANAGER', 'ADMIN']
 
@@ -40,6 +41,19 @@ router.post('/inspect', auth, role(...ALLOWED), async (req, res) => {
   await prisma.activityLog.create({
     data: { userId: req.user.id, action: 'INSPECTION', detail: `Part ${partId} - ${status}` },
   })
+
+  if (status === 'NG') {
+    broadcast('ng-alert', {
+      inspectionId: inspection.id,
+      partName:     inspection.part.partName,
+      partCode:     inspection.part.partCode,
+      length:       inspection.length,
+      width:        inspection.width,
+      diameter:     inspection.diameter,
+      operator:     req.user.username,
+      timestamp:    inspection.timestamp,
+    })
+  }
 
   res.status(201).json(inspection)
 })
