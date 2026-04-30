@@ -22,8 +22,9 @@ model User {
   role        Role
   isActive    Boolean       @default(true)
   createdAt   DateTime      @default(now())
-  inspections Inspection[]
+  inspections  Inspection[]
   activityLogs ActivityLog[]
+  sessions     Session[]
 }
 
 model Part {
@@ -35,20 +36,30 @@ model Part {
   inspections Inspection[]
 }
 
+model Session {
+  id         Int       @id @default(autoincrement())
+  sessionId  String    @unique
+  operatorId Int
+  startedAt  DateTime  @default(now())
+  endedAt    DateTime?
+  operator   User      @relation(fields: [operatorId], references: [id])
+}
+
 model Inspection {
-  id                   Int      @id @default(autoincrement())
-  partId               Int
-  operatorId           Int
-  sessionId            String
-  length               Float?
-  width                Float?
-  diameter             Float?
-  status               String   // OK | NG
+  id                    Int      @id @default(autoincrement())
+  partId                Int
+  operatorId            Int
+  sessionId             String
+  length                Float?
+  width                 Float?
+  diameter              Float?
+  status                String
   engineerConfigVersion String?
-  quantity             Int      @default(1)
-  timestamp            DateTime @default(now())
-  part                 Part     @relation(fields: [partId], references: [id])
-  operator             User     @relation(fields: [operatorId], references: [id])
+  quantity              Int      @default(1)
+  dataHash              String?
+  timestamp             DateTime @default(now())
+  part                  Part     @relation(fields: [partId], references: [id])
+  operator              User     @relation(fields: [operatorId], references: [id])
 }
 
 model ActivityLog {

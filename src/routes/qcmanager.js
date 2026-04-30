@@ -2,11 +2,12 @@ const router = require('express').Router()
 const auth   = require('../middleware/auth')
 const role   = require('../middleware/role')
 const { PrismaClient } = require('@prisma/client')
+const { exportCSV, exportPDF } = require('../exportHelper')
 const prisma = new PrismaClient()
 
 const ALLOWED = ['QUALITY_MANAGER', 'ADMIN']
 
-// GET /api/qcmanager/kpi - real-time KPI cards
+// GET /api/qcmanager/kpi
 router.get('/kpi', auth, role(...ALLOWED), async (req, res) => {
   const today = new Date(); today.setHours(0, 0, 0, 0)
 
@@ -15,8 +16,7 @@ router.get('/kpi', auth, role(...ALLOWED), async (req, res) => {
     prisma.inspection.count({ where: { timestamp: { gte: today }, status: 'NG' } }),
     prisma.$queryRaw`
       SELECT DATE_TRUNC('hour', timestamp) AS hour, COUNT(*) AS count
-      FROM "Inspection"
-      WHERE timestamp >= ${today}
+      FROM "Inspection" WHERE timestamp >= ${today}
       GROUP BY hour ORDER BY hour
     `,
   ])
@@ -38,12 +38,10 @@ router.get('/trends', auth, role(...ALLOWED), async (req, res) => {
   const since    = new Date(Date.now() - daysMap[period] * 86400000)
 
   const data = await prisma.$queryRaw`
-    SELECT
-      DATE_TRUNC(${trunc}, timestamp) AS period,
-      COUNT(*) AS total,
-      SUM(CASE WHEN status = 'NG' THEN 1 ELSE 0 END) AS ng_count
-    FROM "Inspection"
-    WHERE timestamp >= ${since}
+    SELECT DATE_TRUNC(${trunc}, timestamp) AS period,
+           COUNT(*) AS total,
+           SUM(CASE WHEN status = 'NG' THEN 1 ELSE 0 END) AS ng_count
+    FROM "Inspection" WHERE timestamp >= ${since}
     GROUP BY period ORDER BY period
   `
   res.json(data)
@@ -68,7 +66,7 @@ router.get('/defect-patterns', auth, role(...ALLOWED), async (req, res) => {
   res.json({ byVendor, byPart })
 })
 
-// GET /api/qcmanager/inspections - filterable history
+// GET /api/qcmanager/inspections
 router.get('/inspections', auth, role(...ALLOWED), async (req, res) => {
   const { partName, partCode, vendorName, status, dateFrom, dateTo, page = 1, limit = 50 } = req.query
 
@@ -112,14 +110,40 @@ router.get('/alert-summary', auth, role(...ALLOWED), async (req, res) => {
   const [total, byPart] = await Promise.all([
     prisma.inspection.count({ where }),
     prisma.inspection.groupBy({
-      by: ['partId'],
-      where,
+      by: ['partId'], where,
       _count: { id: true },
       orderBy: { _count: { id: 'desc' } },
       take: 5,
     }),
   ])
   res.json({ totalNG: total, topNGParts: byPart })
+})
+
+// GET /api/qcmanager/export?format=csv|pdf&...filters
+router.get('/export', auth, role(...ALLOWED), async (req, res) => {
+  const { format = 'csv', partName, partCode, vendorName, status, dateFrom, dateTo } = req.query
+
+  const where = {
+    ...(status && { status }),
+    ...(dateFrom || dateTo ? { timestamp: {
+      ...(dateFrom && { gte: new Date(dateFrom) }),
+      ...(dateTo   && { lte: new Date(dateTo) }),
+    }} : {}),
+    part: {
+      ...(partName   && { partName:   { contains: partName,   mode: 'insensitive' } }),
+      ...(partCode   && { partCode:   { contains: partCode,   mode: 'insensitive' } }),
+      ...(vendorName && { vendorName: { contains: vendorName, mode: 'insensitive' } }),
+    },
+  }
+
+  const data = await prisma.inspection.findMany({
+    where,
+    include: { part: true, operator: { select: { name: true, username: true } } },
+    orderBy: { timestamp: 'asc' },
+  })
+
+  if (format === 'pdf') return exportPDF(res, data, 'QC Inspection Report', 'qc-report.pdf')
+  exportCSV(res, data, 'qc-report.csv')
 })
 
 module.exports = router
