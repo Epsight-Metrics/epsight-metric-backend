@@ -5,7 +5,8 @@ Quality Control Inspection System dengan real-time monitoring dan analytics.
 ## Features
 
 ✅ **Security Best Practices**
-- JWT Authentication dengan 8 jam expiry
+- JWT Access Token (15 menit) + Refresh Token (7 hari, httpOnly cookie)
+- Refresh token rotation pada setiap request
 - Role-based Access Control (RBAC)
 - Helmet.js untuk HTTP headers security
 - CORS configuration
@@ -16,7 +17,7 @@ Quality Control Inspection System dengan real-time monitoring dan analytics.
 
 ✅ **Database**
 - PostgreSQL dengan Prisma ORM
-- Relational data model (User, Part, Session, Batch, Inspection)
+- Relational data model (User, Part, Session, Batch, Inspection, RefreshToken)
 - Proper indexes untuk performance
 - Activity logging untuk audit trail
 
@@ -57,16 +58,18 @@ npm start
 
 ```env
 DATABASE_URL="postgresql://user:password@localhost:5432/db"
-JWT_SECRET="your-secret-key"
+JWT_SECRET="your-secret-key-min-64-chars"
 PORT=3000
 NODE_ENV=production
-CORS_ORIGIN=*
+CORS_ORIGIN=https://yourdomain.com
 ```
 
 ## API Endpoints
 
 ### Authentication
-- `POST /api/auth/login` - Login (rate limited: 5 attempts/15min)
+- `POST /api/auth/login` - Login, returns access token + set refresh token cookie (rate limited: 5 attempts/15min)
+- `POST /api/auth/refresh` - Rotate refresh token, returns new access token
+- `POST /api/auth/logout` - Invalidate refresh token + clear cookie
 
 ### Operator (OPERATOR_QC, ENGINEER, QUALITY_MANAGER, ADMIN)
 - `POST /api/operator/session/start` - Start work session
@@ -101,6 +104,25 @@ CORS_ORIGIN=*
 ### Health
 - `GET /health` - Health check with database status
 
+## Authentication Flow
+
+```
+1. POST /api/auth/login
+   → Response: { accessToken, user }
+   → Cookie: refreshToken (httpOnly, 7 hari)
+
+2. Setiap request API:
+   → Header: Authorization: Bearer <accessToken>
+
+3. Access token expired (401):
+   → POST /api/auth/refresh (cookie dikirim otomatis)
+   → Response: { accessToken } baru
+   → Cookie: refreshToken baru (rotasi)
+
+4. POST /api/auth/logout
+   → Hapus refresh token dari DB + clear cookie
+```
+
 ## Rate Limits
 
 - Login: 5 attempts per 15 minutes
@@ -120,7 +142,7 @@ CORS_ORIGIN=*
 ## Error Codes
 
 - `400` - Bad Request (validation error)
-- `401` - Unauthorized (invalid/missing token)
+- `401` - Unauthorized (invalid/missing/expired token)
 - `403` - Forbidden (insufficient permissions)
 - `404` - Not Found
 - `409` - Conflict (duplicate entry)
@@ -135,7 +157,8 @@ User (id, username, password, name, role, isActive)
   ├─ Session (sessionId, operatorId, startedAt, endedAt)
   │   └─ InspectionBatch (batchNumber, sessionId, partId, totalQuantity)
   │       └─ Inspection (timestamp, partId, operatorId, sessionId, batchId, ...)
-  └─ ActivityLog (userId, action, detail, createdAt)
+  ├─ ActivityLog (userId, action, detail, createdAt)
+  └─ RefreshToken (token, userId, expiresAt, createdAt)
 
 Part (id, partCode, partName, vendorName)
   └─ Inspection (...)
@@ -152,12 +175,14 @@ Part (id, partCode, partName, vendorName)
 7. ✅ Graceful shutdown
 8. ✅ Health check endpoint
 9. ✅ Password hashing dengan bcrypt (12 rounds)
-10. ✅ JWT dengan expiry time
-11. ✅ Role-based access control
-12. ✅ SQL injection protection
-13. ✅ Activity logging untuk audit
-14. ✅ Pagination pada list endpoints
-15. ✅ Database indexes untuk performance
+10. ✅ Short-lived access token (15m) + long-lived refresh token (7d)
+11. ✅ Refresh token rotation (token lama dihapus setiap refresh)
+12. ✅ Refresh token di httpOnly cookie (aman dari XSS)
+13. ✅ Role-based access control
+14. ✅ SQL injection protection
+15. ✅ Activity logging untuk audit
+16. ✅ Pagination pada list endpoints
+17. ✅ Database indexes untuk performance
 
 ## Development
 
@@ -177,7 +202,7 @@ npm run db:migrate
 1. Set `NODE_ENV=production`
 2. Use strong `JWT_SECRET` (64+ characters)
 3. Configure `CORS_ORIGIN` dengan domain spesifik
-4. Enable HTTPS
+4. Enable HTTPS (wajib agar cookie `secure` flag berfungsi)
 5. Setup database backups
 6. Monitor logs
 7. Setup process manager (PM2)
