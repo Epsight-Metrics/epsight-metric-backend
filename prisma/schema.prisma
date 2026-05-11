@@ -7,20 +7,35 @@ datasource db {
 }
 
 model User {
-  id           Int           @id @default(autoincrement())
-  username     String        @unique
-  password     String
-  name         String
-  role         Role
-  createdAt    DateTime      @default(now()) @map("created_at")
-  isActive     Boolean       @default(true) @map("is_active")
-  activityLogs ActivityLog[]
-  sessions     Session[]
-  inspections  Inspection[]
+  id            Int            @id @default(autoincrement())
+  username      String         @unique
+  password      String
+  name          String
+  role          Role
+  createdAt     DateTime       @default(now()) @map("created_at")
+  isActive      Boolean        @default(true) @map("is_active")
+  activityLogs  ActivityLog[]
+  sessions      Session[]
+  inspections   Inspection[]
+  refreshTokens RefreshToken[]
 
   @@index([username])
   @@index([role])
   @@map("User")
+}
+
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  userId    Int      @map("user_id")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("RefreshToken")
 }
 
 model Part {
