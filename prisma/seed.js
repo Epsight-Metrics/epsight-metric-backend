@@ -1,7 +1,11 @@
 const { PrismaClient } = require('@prisma/client')
+const { PrismaPg } = require('@prisma/adapter-pg')
+const { Pool } = require('pg')
 const bcrypt = require('bcryptjs')
 
-const prisma = new PrismaClient()
+const pool = new Pool({ connectionString: process.env.DATABASE_URL })
+const adapter = new PrismaPg(pool)
+const prisma = new PrismaClient({ adapter })
 
 async function main() {
   // Seed Users
@@ -39,50 +43,63 @@ async function main() {
     })
   }
 
-  // Seed Inspections (30 records spread over last 7 days)
-  const operator1 = await prisma.user.findUnique({ where: { username: 'operator1' } })
-  const operator2 = await prisma.user.findUnique({ where: { username: 'operator2' } })
-  const allParts  = await prisma.part.findMany()
+  // Seed Inspections (30 records spread over last 7 days) - only if empty
+  const existingInspections = await prisma.inspection.count()
+  
+  if (existingInspections === 0) {
+    const operator1 = await prisma.user.findUnique({ where: { username: 'operator1' } })
+    const operator2 = await prisma.user.findUnique({ where: { username: 'operator2' } })
+    const allParts  = await prisma.part.findMany()
 
-  const statuses = ['OK', 'OK', 'OK', 'NG', 'OK', 'OK', 'NG', 'OK']
-  const sessions = ['SES-001', 'SES-002', 'SES-003', 'SES-004']
+    const statuses = ['OK', 'OK', 'OK', 'NG', 'OK', 'OK', 'NG', 'OK']
+    const sessions = ['SES-001', 'SES-002', 'SES-003', 'SES-004']
 
-  for (let i = 0; i < 30; i++) {
-    const daysAgo  = Math.floor(i / 5)
-    const ts       = new Date(Date.now() - daysAgo * 86400000 - i * 600000)
-    const part     = allParts[i % allParts.length]
-    const operator = i % 2 === 0 ? operator1 : operator2
-    const status   = statuses[i % statuses.length]
+    for (let i = 0; i < 30; i++) {
+      const daysAgo  = Math.floor(i / 5)
+      const ts       = new Date(Date.now() - daysAgo * 86400000 - i * 600000)
+      const part     = allParts[i % allParts.length]
+      const operator = i % 2 === 0 ? operator1 : operator2
+      const status   = statuses[i % statuses.length]
 
-    await prisma.inspection.create({
-      data: {
-        partId:               part.id,
-        operatorId:           operator.id,
-        sessionId:            sessions[i % sessions.length],
-        length:               parseFloat((99 + Math.random() * 2).toFixed(2)),
-        width:                parseFloat((49 + Math.random() * 2).toFixed(2)),
-        diameter:             parseFloat((19 + Math.random() * 2).toFixed(2)),
-        status,
-        engineerConfigVersion:'v1.2.0',
-        quantity:             1,
-        timestamp:            ts,
-      },
-    })
+      await prisma.inspection.create({
+        data: {
+          partId:               part.id,
+          operatorId:           operator.id,
+          sessionId:            sessions[i % sessions.length],
+          length:               parseFloat((99 + Math.random() * 2).toFixed(2)),
+          width:                parseFloat((49 + Math.random() * 2).toFixed(2)),
+          diameter:             parseFloat((19 + Math.random() * 2).toFixed(2)),
+          status,
+          engineerConfigVersion:'v1.2.0',
+          quantity:             1,
+          timestamp:            ts,
+        },
+      })
+    }
   }
 
-  // Seed Activity Logs
-  const admin = await prisma.user.findUnique({ where: { username: 'admin' } })
-  const logs = [
-    { userId: admin.id,     action: 'LOGIN',       detail: 'Admin login' },
-    { userId: operator1.id, action: 'INSPECTION',  detail: 'Inspected PT-001' },
-    { userId: operator2.id, action: 'INSPECTION',  detail: 'Inspected PT-002' },
-    { userId: admin.id,     action: 'CREATE_USER',  detail: 'Created user operator2' },
-  ]
-  await prisma.activityLog.createMany({ data: logs })
+  // Seed Activity Logs - only if empty
+  const existingLogs = await prisma.activityLog.count()
+  if (existingLogs === 0) {
+    const admin     = await prisma.user.findUnique({ where: { username: 'admin' } })
+    const operator1 = await prisma.user.findUnique({ where: { username: 'operator1' } })
+    const operator2 = await prisma.user.findUnique({ where: { username: 'operator2' } })
+    await prisma.activityLog.createMany({
+      data: [
+        { userId: admin.id,     action: 'LOGIN',       detail: 'Admin login' },
+        { userId: operator1.id, action: 'INSPECTION',  detail: 'Inspected PT-001' },
+        { userId: operator2.id, action: 'INSPECTION',  detail: 'Inspected PT-002' },
+        { userId: admin.id,     action: 'CREATE_USER', detail: 'Created user operator2' },
+      ]
+    })
+  }
 
   console.log('Seeding completed.')
 }
 
 main()
   .catch(e => { console.error(e); process.exit(1) })
-  .finally(() => prisma.$disconnect())
+  .finally(async () => {
+    await prisma.$disconnect()
+    await pool.end()
+  })
