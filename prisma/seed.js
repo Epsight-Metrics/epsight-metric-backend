@@ -52,7 +52,6 @@ async function main() {
     const allParts  = await prisma.part.findMany()
 
     const statuses = ['OK', 'OK', 'OK', 'NG', 'OK', 'OK', 'NG', 'OK']
-    const sessions = ['SES-001', 'SES-002', 'SES-003', 'SES-004']
 
     for (let i = 0; i < 30; i++) {
       const daysAgo  = Math.floor(i / 5)
@@ -63,16 +62,11 @@ async function main() {
 
       await prisma.inspection.create({
         data: {
-          partId:               part.id,
-          operatorId:           operator.id,
-          sessionId:            sessions[i % sessions.length],
-          length:               parseFloat((99 + Math.random() * 2).toFixed(2)),
-          width:                parseFloat((49 + Math.random() * 2).toFixed(2)),
-          diameter:             parseFloat((19 + Math.random() * 2).toFixed(2)),
+          partId:     part.id,
+          operatorId: operator.id,
           status,
-          engineerConfigVersion:'v1.2.0',
-          quantity:             1,
-          timestamp:            ts,
+          shape:      ['circle', 'rectangle', 'triangle'][i % 3],
+          timestamp:  ts,
         },
       })
     }
