@@ -9,6 +9,9 @@ const logger = require('./middleware/logger')
 const { apiLimiter } = require('./middleware/rateLimiter')
 const prisma = require('./db')
 
+// Trust Railway/proxy reverse proxy
+app.set('trust proxy', 1)
+
 // Security & Middleware
 app.use(helmet())
 app.use(cors({
