@@ -15,8 +15,18 @@ app.set('trust proxy', 1)
 
 // Security & Middleware
 app.use(helmet())
+const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:5173')
+  .split(',').map(o => o.trim())
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: (origin, callback) => {
+    // Izinkan request tanpa origin (curl, Postman, CV program)
+    if (!origin) return callback(null, true)
+    if (ALLOWED_ORIGINS.includes('*') || ALLOWED_ORIGINS.includes(origin)) {
+      return callback(null, true)
+    }
+    callback(new Error(CORS: origin  tidak diizinkan))
+  },
   credentials: true,
 }))
 app.use(express.json({ limit: '10mb' }))
