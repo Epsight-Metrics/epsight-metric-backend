@@ -1,4 +1,4 @@
-const router = require('express').Router()
+﻿const router = require('express').Router()
 const auth = require('../middleware/auth')
 const role = require('../middleware/role')
 const { body } = require('express-validator')
@@ -222,4 +222,31 @@ router.get('/parts', auth, role(...ALLOWED), async (req, res) => {
   }
 })
 
+
+// GET /api/operator/active-session/public — tanpa auth, untuk CV ambil sesi aktif
+// CV query ini setiap X detik untuk sinkronisasi sessionId & operatorId
+router.get('/active-session/public', async (req, res) => {
+  try {
+    const activeSession = await prisma.session.findFirst({
+      where:   { endedAt: null },
+      orderBy: { startedAt: 'desc' },
+      include: { operator: { select: { id: true, name: true, username: true } } },
+    })
+
+    if (!activeSession) {
+      return res.json({ active: false, sessionId: null, operatorId: null, operatorName: null })
+    }
+
+    res.json({
+      active:       true,
+      sessionId:    activeSession.sessionId,
+      operatorId:   activeSession.operatorId,
+      operatorName: activeSession.operator.name,
+      startedAt:    activeSession.startedAt,
+    })
+  } catch (err) {
+    console.error('Active session public error:', err)
+    res.status(500).json({ message: 'Failed to fetch active session' })
+  }
+})
 module.exports = router
