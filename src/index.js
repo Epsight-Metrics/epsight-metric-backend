@@ -1,4 +1,4 @@
-require('dotenv').config()
+﻿require('dotenv').config()
 const express = require('express')
 const helmet = require('helmet')
 const cors = require('cors')
@@ -42,7 +42,8 @@ app.use('/api/auth',      require('./routes/auth'))
 app.use('/api/operator',  require('./routes/operator'))
 app.use('/api/admin',     require('./routes/admin'))
 app.use('/api/qcmanager', require('./routes/qcmanager'))
-app.use('/api/audit',     require('./routes/audit'))
+app.use('/api/audit',    require('./routes/audit'))
+app.use('/api/engineer', require('./routes/engineer'))
 
 app.get('/health', async (_, res) => {
   try {
@@ -79,9 +80,9 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3000
 const server = app.listen(PORT, () => {
-  console.log(`✓ Server running on port ${PORT}`)
-  console.log(`✓ Environment: ${process.env.NODE_ENV || 'development'}`)
-  console.log(`✓ Database: ${process.env.DATABASE_URL?.split('@')[1]?.split('/')[1] || 'connected'}`)
+  console.log(`âœ“ Server running on port ${PORT}`)
+  console.log(`âœ“ Environment: ${process.env.NODE_ENV || 'development'}`)
+  console.log(`âœ“ Database: ${process.env.DATABASE_URL?.split('@')[1]?.split('/')[1] || 'connected'}`)
 })
 
 // Graceful shutdown
@@ -89,20 +90,20 @@ const shutdown = async (signal) => {
   console.log(`\n${signal} received, shutting down gracefully...`)
   
   server.close(async () => {
-    console.log('✓ HTTP server closed')
+    console.log('âœ“ HTTP server closed')
     
     try {
       await prisma.$disconnect()
-      console.log('✓ Database disconnected')
+      console.log('âœ“ Database disconnected')
       process.exit(0)
     } catch (err) {
-      console.error('✗ Error during shutdown:', err)
+      console.error('âœ— Error during shutdown:', err)
       process.exit(1)
     }
   })
   
   setTimeout(() => {
-    console.error('✗ Forced shutdown after timeout')
+    console.error('âœ— Forced shutdown after timeout')
     process.exit(1)
   }, 10000)
 }

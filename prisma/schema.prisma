@@ -15,6 +15,7 @@ model User {
   createdAt     DateTime       @default(now()) @map("created_at")
   isActive      Boolean        @default(true) @map("is_active")
   activityLogs  ActivityLog[]
+  cvConfigs     CvConfig[]
   sessions      Session[]
   inspections   Inspection[]
   refreshTokens RefreshToken[]
@@ -113,6 +114,22 @@ model Inspection {
   @@map("inspeksi_log")
 }
 
+
+model CvConfig {
+  id              Int      @id @default(autoincrement())
+  pixelPerMm      Float    @default(9.28) @map("pixel_per_mm")
+  toleranceMm     Float    @default(1.0)  @map("tolerance_mm")
+  contourThresh   Int      @default(200)  @map("contour_thresh")
+  contourMinArea  Int      @default(1500) @map("contour_min_area")
+  minFeatureMm    Float    @default(5.0)  @map("min_feature_mm")
+  roiPercent      Json     @default("[0.20, 0.10, 0.80, 0.90]") @map("roi_percent")
+  warningDuration Float    @default(5.0)  @map("warning_duration")
+  updatedAt       DateTime @updatedAt     @map("updated_at")
+  updatedBy       Int      @map("updated_by")
+  updatedByUser   User     @relation(fields: [updatedBy], references: [id])
+
+  @@map("cv_config")
+}
 model ActivityLog {
   id        Int      @id @default(autoincrement())
   action    String
@@ -134,3 +151,5 @@ enum Role {
   AUDIT
   ADMIN
 }
+
+
