@@ -23,7 +23,7 @@ app.use(cors({
     // Izinkan request tanpa origin (curl, Postman, CV program)
     if (!origin) return callback(null, true)
     if (ALLOWED_ORIGINS.includes('*') || ALLOWED_ORIGINS.includes(origin)) {
-      return callback(null, true)
+      return callback(null, origin)
     }
     callback(new Error('CORS: origin tidak diizinkan'))
   },
@@ -120,3 +120,4 @@ const shutdown = async (signal) => {
 
 process.on('SIGTERM', () => shutdown('SIGTERM'))
 process.on('SIGINT', () => shutdown('SIGINT'))
+
