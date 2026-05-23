@@ -99,6 +99,7 @@ model Inspection {
   operatorId   Int?             @map("operator_id")
   partId       Int              @map("part_id")
   sessionId    String?          @map("session_id")
+  hash         String?          @db.VarChar(64)
   batch        InspectionBatch? @relation(fields: [batchId], references: [id])
   operator     User?            @relation(fields: [operatorId], references: [id])
   part         Part             @relation(fields: [partId], references: [id])

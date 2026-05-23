@@ -9,14 +9,43 @@ const ALLOWED = ['QUALITY_MANAGER', 'ADMIN']
 // GET /api/qcmanager/kpi
 router.get('/kpi', auth, role(...ALLOWED), async (req, res) => {
   try {
-    const today = new Date(); today.setHours(0, 0, 0, 0)
+    const { dateFrom, dateTo } = req.query
+    
+    // Validate date range if provided
+    if (dateFrom && dateTo) {
+      const from = new Date(dateFrom)
+      const to = new Date(dateTo)
+      
+      if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+        return res.status(400).json({ message: 'Invalid date format. Use YYYY-MM-DD' })
+      }
+      
+      if (from > to) {
+        return res.status(400).json({ message: 'dateFrom cannot be greater than dateTo' })
+      }
+    }
+    
+    // Set date range
+    let startDate, endDate
+    if (dateFrom && dateTo) {
+      startDate = new Date(dateFrom)
+      startDate.setHours(0, 0, 0, 0)
+      endDate = new Date(dateTo)
+      endDate.setHours(23, 59, 59, 999)
+    } else {
+      // Default: today
+      startDate = new Date()
+      startDate.setHours(0, 0, 0, 0)
+      endDate = new Date()
+      endDate.setHours(23, 59, 59, 999)
+    }
 
     const [total, ngCount, hourlyRaw] = await Promise.all([
-      prisma.inspection.count({ where: { timestamp: { gte: today } } }),
-      prisma.inspection.count({ where: { timestamp: { gte: today }, status: { in: ['NG', 'NO GOOD'] } } }),
+      prisma.inspection.count({ where: { timestamp: { gte: startDate, lte: endDate } } }),
+      prisma.inspection.count({ where: { timestamp: { gte: startDate, lte: endDate }, status: { in: ['NG', 'NO GOOD'] } } }),
       prisma.$queryRaw`
         SELECT DATE_TRUNC('hour', timestamp) AS hour, COUNT(*) AS count
-        FROM inspeksi_log WHERE timestamp >= ${today}
+        FROM inspeksi_log WHERE timestamp >= ${startDate} AND timestamp <= ${endDate}
         GROUP BY hour ORDER BY hour
       `,
     ])
@@ -24,10 +53,14 @@ router.get('/kpi', auth, role(...ALLOWED), async (req, res) => {
     const okCount    = total - ngCount
     const ngRate     = total ? ((ngCount / total) * 100).toFixed(2) : 0
     const okRate     = total ? ((okCount / total) * 100).toFixed(2) : 0
-    const throughput = hourlyRaw.length ? Math.round(total / hourlyRaw.length) : 0
+    
+    // Calculate throughput per hour based on date range
+    const hoursDiff = Math.max(1, Math.floor((endDate - startDate) / (1000 * 60 * 60)))
+    const throughput = Math.floor(total / hoursDiff)
 
     res.json({ total, ngCount, okCount, ngRate, okRate, throughputPerHour: throughput })
   } catch (err) {
+    console.error('KPI error:', err)
     res.status(500).json({ message: 'Server error', error: err.message })
   }
 })
@@ -35,7 +68,41 @@ router.get('/kpi', auth, role(...ALLOWED), async (req, res) => {
 // GET /api/qcmanager/trends?period=day|week|month
 router.get('/trends', auth, role(...ALLOWED), async (req, res) => {
   try {
-    const { period = 'day' } = req.query
+    const { period = 'day', dateFrom, dateTo } = req.query
+    
+    // If custom date range provided, use it
+    if (dateFrom && dateTo) {
+      const from = new Date(dateFrom)
+      const to = new Date(dateTo)
+      
+      // Validate dates
+      if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+        return res.status(400).json({ message: 'Invalid date format. Use YYYY-MM-DD' })
+      }
+      
+      if (from > to) {
+        return res.status(400).json({ message: 'dateFrom cannot be greater than dateTo' })
+      }
+      
+      // Set time boundaries
+      from.setHours(0, 0, 0, 0)
+      to.setHours(23, 59, 59, 999)
+      
+      // Custom range: always group by day
+      const data = await prisma.$queryRaw`
+        SELECT 
+          DATE_TRUNC('day', timestamp) AS period,
+          COUNT(*)::int AS total,
+          SUM(CASE WHEN status IN ('NG', 'NO GOOD') THEN 1 ELSE 0 END)::int AS ng_count
+        FROM inspeksi_log 
+        WHERE timestamp >= ${from} AND timestamp <= ${to}
+        GROUP BY DATE_TRUNC('day', timestamp)
+        ORDER BY period ASC
+      `
+      return res.json(data)
+    }
+    
+    // Default behavior: period-based
     const truncMap = { day: 'hour', week: 'day', month: 'week' }
     const daysMap = { day: 1, week: 7, month: 30 }
     const trunc = truncMap[period] || 'hour'

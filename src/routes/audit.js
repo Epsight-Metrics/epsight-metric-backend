@@ -3,6 +3,7 @@ const auth = require('../middleware/auth')
 const role = require('../middleware/role')
 const prisma = require('../db')
 const { exportCSV, exportPDF } = require('../exportHelper')
+const { validateInspectionIntegrity } = require('../utils/hashGenerator')
 
 const ALLOWED = ['AUDIT', 'ADMIN', 'QUALITY_MANAGER']
 
@@ -85,6 +86,28 @@ router.get('/export', auth, role(...ALLOWED), async (req, res) => {
     if (format === 'pdf') return exportPDF(res, data, 'Audit Inspection Evidence', 'audit-evidence.pdf')
     exportCSV(res, data, 'audit-evidence.csv')
   } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message })
+  }
+})
+
+// POST /api/audit/validate-integrity
+router.post('/validate-integrity', auth, role(...ALLOWED), async (req, res) => {
+  try {
+    const { inspectionId } = req.body
+    
+    if (!inspectionId) {
+      return res.status(400).json({ message: 'inspectionId is required' })
+    }
+    
+    const inspection = await prisma.inspection.findUnique({
+      where: { id: parseInt(inspectionId) }
+    })
+    
+    const result = validateInspectionIntegrity(inspection)
+    
+    res.json(result)
+  } catch (err) {
+    console.error('Validate integrity error:', err)
     res.status(500).json({ message: 'Server error', error: err.message })
   }
 })
