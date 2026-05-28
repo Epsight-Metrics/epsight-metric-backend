@@ -6,6 +6,7 @@ const validate = require('../middleware/validate')
 const { cvLimiter } = require('../middleware/rateLimiter')
 const prisma = require('../db')
 const { broadcast } = require('../sse')
+const { generateInspectionHash } = require('../utils/hashGenerator')
 
 const ALLOWED = ['OPERATOR_QC', 'ENGINEER', 'QUALITY_MANAGER', 'ADMIN']
 
@@ -120,20 +121,35 @@ router.post('/inspect/cv',
         },
       })
 
+      // Generate hash after creation
+      const hash = generateInspectionHash(inspection)
+      
+      const updated = await prisma.inspection.update({
+        where: { id: inspection.id },
+        data: { hash },
+        include: { 
+          part: true, 
+          operator: { select: { username: true, name: true } }, 
+          session: true, 
+          batch: true 
+        },
+      })
+
       const payload = {
-        inspectionId: inspection.id,
-        partId: inspection.partId,
-        partName: inspection.part.partName,
-        partCode: inspection.part.partCode,
-        operatorName: inspection.operator?.name,
-        sessionId: inspection.sessionId,
-        batchId: inspection.batchId,
-        idPart: inspection.idPart,
-        shape: inspection.shape,
-        status: inspection.status,
-        matchedRef: inspection.matchedRef,
-        imagePath: inspection.imagePath,
-        timestamp: inspection.timestamp,
+        inspectionId: updated.id,
+        partId: updated.partId,
+        partName: updated.part.partName,
+        partCode: updated.part.partCode,
+        operatorName: updated.operator?.name,
+        sessionId: updated.sessionId,
+        batchId: updated.batchId,
+        idPart: updated.idPart,
+        shape: updated.shape,
+        status: updated.status,
+        matchedRef: updated.matchedRef,
+        imagePath: updated.imagePath,
+        timestamp: updated.timestamp,
+        hash: updated.hash,
       }
 
       broadcast('inspection-update', payload)
@@ -141,7 +157,7 @@ router.post('/inspect/cv',
         broadcast('ng-alert', payload)
       }
 
-      res.status(201).json({ success: true, inspection })
+      res.status(201).json({ success: true, inspection: updated })
     } catch (err) {
       console.error('CV Inspection error:', err)
       res.status(500).json({ message: 'Failed to create inspection' })
@@ -179,20 +195,30 @@ router.post('/inspect',
         include: { part: true, session: true, batch: true },
       })
 
+      // Generate hash after creation
+      const hash = generateInspectionHash(inspection)
+      
+      const updated = await prisma.inspection.update({
+        where: { id: inspection.id },
+        data: { hash },
+        include: { part: true, session: true, batch: true, operator: { select: { name: true, username: true } } },
+      })
+
       const payload = {
-        inspectionId: inspection.id,
-        partId: inspection.partId,
-        partName: inspection.part.partName,
-        partCode: inspection.part.partCode,
-        sessionId: inspection.sessionId,
-        batchId: inspection.batchId,
-        idPart: inspection.idPart,
-        shape: inspection.shape,
-        status: inspection.status,
-        matchedRef: inspection.matchedRef,
-        imagePath: inspection.imagePath,
+        inspectionId: updated.id,
+        partId: updated.partId,
+        partName: updated.part.partName,
+        partCode: updated.part.partCode,
+        sessionId: updated.sessionId,
+        batchId: updated.batchId,
+        idPart: updated.idPart,
+        shape: updated.shape,
+        status: updated.status,
+        matchedRef: updated.matchedRef,
+        imagePath: updated.imagePath,
         operator: req.user.username,
-        timestamp: inspection.timestamp,
+        timestamp: updated.timestamp,
+        hash: updated.hash,
       }
 
       broadcast('inspection-update', payload)
@@ -200,7 +226,7 @@ router.post('/inspect',
         broadcast('ng-alert', payload)
       }
 
-      res.status(201).json(inspection)
+      res.status(201).json(updated)
     } catch (err) {
       console.error('Manual inspection error:', err)
       res.status(500).json({ message: 'Failed to create inspection' })
