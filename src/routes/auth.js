@@ -70,6 +70,13 @@ router.post('/login',
       ])
 
       res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS)
+      res.cookie('accessToken', accessToken, {
+        httpOnly: false,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        maxAge: 15 * 60 * 1000,
+        path: '/'
+      })
       res.json({ accessToken, user: { id: user.id, name: user.name, role: user.role, username: user.username } })
     } catch (err) {
       console.error('Login error:', err)
@@ -104,6 +111,13 @@ router.post('/refresh', async (req, res) => {
     ])
 
     res.cookie('refreshToken', newRefreshToken, COOKIE_OPTIONS)
+    res.cookie('accessToken', generateAccessToken(stored.user), {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      maxAge: 15 * 60 * 1000,
+      path: '/'
+    })
     res.json({ accessToken: generateAccessToken(stored.user) })
   } catch (err) {
     console.error('Refresh error:', err)
@@ -121,6 +135,7 @@ router.post('/logout', auth, async (req, res) => {
     ])
 
     res.clearCookie('refreshToken', { ...COOKIE_OPTIONS, maxAge: 0 })
+    res.clearCookie('accessToken', { path: '/', maxAge: 0 })
     res.json({ message: 'Logged out successfully' })
   } catch (err) {
     console.error('Logout error:', err)
