@@ -14,7 +14,35 @@ const prisma = require('./db')
 app.set('trust proxy', 1)
 
 // Security & Middleware
-app.use(helmet())
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      connectSrc: ["'self'", "ws:", "wss:"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+    }
+  },
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  },
+  frameguard: { action: 'deny' },
+  noSniff: true,
+  xssFilter: true,
+}))
+
+// Force HTTPS in production
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    if (req.header('x-forwarded-proto') !== 'https') {
+      return res.redirect(`https://${req.header('host')}${req.url}`)
+    }
+    next()
+  })
+}
 const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:5173')
   .split(',').map(o => o.trim())
 
@@ -54,6 +82,7 @@ app.use('/api/admin',     require('./routes/admin'))
 app.use('/api/qcmanager', require('./routes/qcmanager'))
 app.use('/api/audit',    require('./routes/audit'))
 app.use('/api/engineer', require('./routes/engineer'))
+app.use('/api/stream',   require('./routes/stream'))
 
 app.get('/health', async (_, res) => {
   try {

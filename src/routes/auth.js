@@ -9,6 +9,7 @@ const { loginLimiter } = require('../middleware/rateLimiter')
 const auth = require('../middleware/auth')
 
 const REFRESH_TOKEN_EXPIRY_DAYS = 7
+const BCRYPT_ROUNDS = 12  // Increased from default 10 for better security
 const COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
@@ -29,7 +30,7 @@ function generateAccessToken(user) {
 router.post('/login',
   loginLimiter,
   [
-    body('username').trim().notEmpty().withMessage('Username is required'),
+    body('username').trim().escape().notEmpty().withMessage('Username is required'),
     body('password').notEmpty().withMessage('Password is required'),
   ],
   validate,
@@ -54,7 +55,18 @@ router.post('/login',
 
       await prisma.$transaction([
         prisma.refreshToken.create({ data: { token: refreshToken, userId: user.id, expiresAt } }),
-        prisma.activityLog.create({ data: { userId: user.id, action: 'LOGIN', detail: `${user.username} logged in from ${req.ip}` } }),
+        prisma.activityLog.create({ 
+          data: { 
+            userId: user.id, 
+            action: 'LOGIN', 
+            detail: JSON.stringify({ 
+              username: user.username, 
+              ip: req.ip, 
+              userAgent: req.get('user-agent'),
+              timestamp: new Date().toISOString()
+            })
+          } 
+        }),
       ])
 
       res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS)
