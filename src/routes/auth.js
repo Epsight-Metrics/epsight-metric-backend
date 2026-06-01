@@ -12,10 +12,10 @@ const REFRESH_TOKEN_EXPIRY_DAYS = 7
 const BCRYPT_ROUNDS = 12  // Increased from default 10 for better security
 const COOKIE_OPTIONS = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+  secure: true,
+  sameSite: 'none',
   maxAge: REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000,
-  path: '/',
+  path: '/'
 }
 
 function generateAccessToken(user) {
@@ -72,8 +72,8 @@ router.post('/login',
       res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS)
       res.cookie('accessToken', accessToken, {
         httpOnly: false,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        secure: true,
+        sameSite: 'none',
         maxAge: 15 * 60 * 1000,
         path: '/'
       })
@@ -88,8 +88,14 @@ router.post('/login',
 // POST /api/auth/refresh
 router.post('/refresh', async (req, res) => {
   try {
+    console.log('Refresh request cookies:', req.cookies)
+    console.log('Refresh request headers:', req.headers.cookie)
+    
     const token = req.cookies?.refreshToken
-    if (!token) return res.status(401).json({ message: 'No refresh token' })
+    if (!token) {
+      console.log('No refresh token found in cookies')
+      return res.status(401).json({ message: 'No refresh token' })
+    }
 
     const stored = await prisma.refreshToken.findUnique({
       where: { token },
@@ -113,8 +119,8 @@ router.post('/refresh', async (req, res) => {
     res.cookie('refreshToken', newRefreshToken, COOKIE_OPTIONS)
     res.cookie('accessToken', generateAccessToken(stored.user), {
       httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      secure: true,
+      sameSite: 'none',
       maxAge: 15 * 60 * 1000,
       path: '/'
     })
