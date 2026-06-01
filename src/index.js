@@ -50,12 +50,22 @@ app.use(cors({
   origin: (origin, callback) => {
     // Izinkan request tanpa origin (curl, Postman, CV program)
     if (!origin) return callback(null, true)
+    
+    // Development mode: izinkan semua origin
+    if (process.env.NODE_ENV !== 'production') {
+      return callback(null, origin)
+    }
+    
+    // Production mode: cek whitelist
     if (ALLOWED_ORIGINS.includes('*') || ALLOWED_ORIGINS.includes(origin)) {
       return callback(null, origin)
     }
     callback(new Error('CORS: origin tidak diizinkan'))
   },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Set-Cookie'],
 }))
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
