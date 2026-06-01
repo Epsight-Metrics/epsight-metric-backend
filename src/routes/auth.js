@@ -13,9 +13,9 @@ const BCRYPT_ROUNDS = 12  // Increased from default 10 for better security
 const COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
-  sameSite: 'strict',
+  sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
   maxAge: REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000,
-  path: '/api/auth',
+  path: '/',
 }
 
 function generateAccessToken(user) {
