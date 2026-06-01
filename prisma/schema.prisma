@@ -131,6 +131,24 @@ model CvConfig {
 
   @@map("cv_config")
 }
+
+model Reference {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique @db.VarChar(128)
+  shape       String   @db.VarChar(32)
+  vertices    Int
+  diameterMm  Float    @map("diameter_mm")
+  widthMm     Float    @map("width_mm")
+  heightMm    Float    @map("height_mm")
+  toleranceMm Float    @map("tolerance_mm")
+  createdAt   DateTime @default(now()) @map("created_at")
+  createdBy   Int      @map("created_by")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([name])
+  @@index([shape])
+  @@map("reference")
+}
 model ActivityLog {
   id        Int      @id @default(autoincrement())
   action    String

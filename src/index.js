@@ -93,6 +93,7 @@ app.use('/api/qcmanager', require('./routes/qcmanager'))
 app.use('/api/audit',    require('./routes/audit'))
 app.use('/api/engineer', require('./routes/engineer'))
 app.use('/api/stream',   require('./routes/stream'))
+app.use('/api/reference', require('./routes/reference'))
 
 app.get('/health', async (_, res) => {
   try {
