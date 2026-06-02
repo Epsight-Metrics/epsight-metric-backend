@@ -165,7 +165,6 @@ model ActivityLog {
 
 enum Role {
   OPERATOR_QC
-  ENGINEER
   QUALITY_MANAGER
   AUDIT
   ADMIN

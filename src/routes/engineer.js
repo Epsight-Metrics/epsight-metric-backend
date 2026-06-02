@@ -5,7 +5,7 @@ const { body } = require('express-validator')
 const validate = require('../middleware/validate')
 const prisma = require('../db')
 
-const ALLOWED = ['ENGINEER', 'ADMIN']
+const ALLOWED = ['OPERATOR_QC', 'QUALITY_MANAGER', 'ADMIN']
 
 // GET /api/engineer/calibration
 router.get('/calibration', auth, role(...ALLOWED), async (req, res) => {

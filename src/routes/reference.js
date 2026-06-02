@@ -6,7 +6,7 @@ const validate = require('../middleware/validate')
 const prisma = require('../db')
 const { broadcast } = require('../sse')
 
-const ALLOWED = ['OPERATOR_QC', 'ENGINEER', 'QUALITY_MANAGER', 'ADMIN']
+const ALLOWED = ['OPERATOR_QC', 'QUALITY_MANAGER', 'ADMIN']
 
 // GET /api/reference - List all references
 router.get('/', auth, role(...ALLOWED), async (req, res) => {
@@ -160,7 +160,7 @@ router.delete('/:name',
 // DELETE /api/reference - Clear all references
 router.delete('/',
   auth,
-  role('ENGINEER', 'ADMIN'),
+  role('QUALITY_MANAGER', 'ADMIN'),
   async (req, res) => {
     try {
       await prisma.reference.deleteMany({})

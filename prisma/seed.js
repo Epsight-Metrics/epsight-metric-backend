@@ -1,8 +1,10 @@
-require('dotenv').config()
+﻿require('dotenv').config()
 const { PrismaClient } = require('@prisma/client')
 const { PrismaPg } = require('@prisma/adapter-pg')
 const { Pool } = require('pg')
 const bcrypt = require('bcryptjs')
+const fs = require('fs')
+const path = require('path')
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
 const adapter = new PrismaPg(pool)
@@ -14,7 +16,6 @@ async function main() {
     { username: 'admin',    password: 'admin123',    name: 'Administrator',    role: 'ADMIN' },
     { username: 'operator1',password: 'operator123', name: 'Budi Santoso',     role: 'OPERATOR_QC' },
     { username: 'operator2',password: 'operator123', name: 'Siti Rahayu',      role: 'OPERATOR_QC' },
-    { username: 'engineer1',password: 'engineer123', name: 'Andi Wijaya',      role: 'ENGINEER' },
     { username: 'qcmanager',password: 'manager123',  name: 'Dewi Kusuma',      role: 'QUALITY_MANAGER' },
     { username: 'auditor1', password: 'audit123',    name: 'Rudi Hartono',     role: 'AUDIT' },
   ]
@@ -24,6 +25,62 @@ async function main() {
       where: { username: u.username },
       update: {},
       create: { ...u, password: await bcrypt.hash(u.password, 10) },
+    })
+  }
+
+  const admin = await prisma.user.findUnique({ where: { username: 'admin' } })
+
+  // Seed References from referensi.json
+  const refPath = path.join(__dirname, '..', '..', 'epsight-metric-mainprogram', 'referensi.json')
+  if (fs.existsSync(refPath)) {
+    console.log('Seeding references from referensi.json...')
+    try {
+      let refContent = fs.readFileSync(refPath, 'utf8')
+      refContent = refContent.replace(/^\uFEFF/, '')
+      const refData = JSON.parse(refContent)
+      for (const [refName, data] of Object.entries(refData)) {
+        await prisma.reference.upsert({
+          where: { name: refName },
+          update: {
+            shape: data.shape,
+            vertices: data.vertices,
+            diameterMm: data.diameter_mm,
+            widthMm: data.width_mm,
+            heightMm: data.height_mm,
+            toleranceMm: data.tolerance_mm,
+          },
+          create: {
+            name: data.name,
+            shape: data.shape,
+            vertices: data.vertices,
+            diameterMm: data.diameter_mm,
+            widthMm: data.width_mm,
+            heightMm: data.height_mm,
+            toleranceMm: data.tolerance_mm,
+            createdBy: admin.id,
+          }
+        })
+      }
+    } catch (e) {
+      console.error('Failed to seed references:', e)
+    }
+  }
+
+  // Seed CV Config - only if empty
+  const existingConfig = await prisma.cvConfig.count()
+  if (existingConfig === 0) {
+    console.log('Seeding default CV Config...')
+    await prisma.cvConfig.create({
+      data: {
+        pixelPerMm: 9.28,
+        toleranceMm: 1.0,
+        contourThresh: 200,
+        contourMinArea: 1500,
+        minFeatureMm: 5.0,
+        roiPercent: [0.20, 0.10, 0.80, 0.90],
+        warningDuration: 5.0,
+        updatedBy: admin.id,
+      }
     })
   }
 

@@ -23,7 +23,7 @@ const upload = multer({
   }
 })
 
-const ALLOWED = ['OPERATOR_QC', 'ENGINEER', 'QUALITY_MANAGER', 'ADMIN']
+const ALLOWED = ['OPERATOR_QC', 'QUALITY_MANAGER', 'ADMIN']
 
 // POST /api/operator/session/start
 router.post('/session/start', 
@@ -176,6 +176,14 @@ router.post('/inspect/online',
         })
       }
 
+      // Prepare additional detail for NG cases
+      const inspectionDetail = {
+        deviations: cvResult.deviations || {},
+        referenceMatched: cvResult.reference_matched,
+        cvDetail: cvResult.detail,
+        measurements: cvResult.measurements
+      }
+
       // Save inspection to database
       const inspection = await prisma.inspection.create({
         data: {
@@ -184,7 +192,7 @@ router.post('/inspect/online',
           sessionId: sessionId,
           batchId: batchId ? parseInt(batchId) : null,
           shape: cvResult.measurements.shape,
-          nilaiDimensi: cvResult.measurements,
+          nilaiDimensi: inspectionDetail,
           status: cvResult.status,
           matchedRef: cvResult.reference_matched,
           imagePath: null, // Could save to cloud storage if needed
