@@ -168,6 +168,12 @@ router.post('/inspect/online',
       )
 
       const cvResult = cvResponse.data
+      
+      // DEBUG: Log CV response
+      console.log('[DEBUG] CV API Response:', JSON.stringify(cvResult, null, 2))
+      console.log('[DEBUG] reference_matched:', cvResult.reference_matched)
+      console.log('[DEBUG] matched_ref:', cvResult.matched_ref)
+      console.log('[DEBUG] matchedRef:', cvResult.matchedRef)
 
       if (!cvResult.success) {
         return res.status(400).json({ 
@@ -444,6 +450,42 @@ router.get('/parts', auth, role(...ALLOWED), async (req, res) => {
   } catch (err) {
     console.error('Get parts error:', err)
     res.status(500).json({ message: 'Failed to fetch parts' })
+  }
+})
+
+// GET /api/operator/inspections/:id - Get single inspection detail
+router.get('/inspections/:id', auth, role(...ALLOWED), async (req, res) => {
+  try {
+    const inspectionId = parseInt(req.params.id)
+    
+    if (isNaN(inspectionId)) {
+      return res.status(400).json({ message: 'Invalid inspection ID' })
+    }
+    
+    const inspection = await prisma.inspection.findUnique({
+      where: { id: inspectionId },
+      include: {
+        part: true,
+        operator: { select: { username: true, name: true } },
+        session: true,
+        batch: true
+      }
+    })
+    
+    if (!inspection) {
+      return res.status(404).json({ message: 'Inspection not found' })
+    }
+    
+    // Optional: Check if user has permission to view this inspection
+    // For operator, only allow viewing own inspections
+    if (req.user.role === 'OPERATOR_QC' && inspection.operatorId !== req.user.id) {
+      return res.status(403).json({ message: 'Not authorized to view this inspection' })
+    }
+    
+    res.json({ inspection })
+  } catch (err) {
+    console.error('Get inspection detail error:', err)
+    res.status(500).json({ message: 'Failed to fetch inspection detail' })
   }
 })
 
