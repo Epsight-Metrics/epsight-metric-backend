@@ -168,12 +168,6 @@ router.post('/inspect/online',
       )
 
       const cvResult = cvResponse.data
-      
-      // DEBUG: Log CV response
-      console.log('[DEBUG] CV API Response:', JSON.stringify(cvResult, null, 2))
-      console.log('[DEBUG] reference_matched:', cvResult.reference_matched)
-      console.log('[DEBUG] matched_ref:', cvResult.matched_ref)
-      console.log('[DEBUG] matchedRef:', cvResult.matchedRef)
 
       if (!cvResult.success) {
         return res.status(400).json({ 
