@@ -447,6 +447,42 @@ router.get('/parts', auth, role(...ALLOWED), async (req, res) => {
   }
 })
 
+// GET /api/operator/inspections/:id - Get single inspection detail
+router.get('/inspections/:id', auth, role(...ALLOWED), async (req, res) => {
+  try {
+    const inspectionId = parseInt(req.params.id)
+    
+    if (isNaN(inspectionId)) {
+      return res.status(400).json({ message: 'Invalid inspection ID' })
+    }
+    
+    const inspection = await prisma.inspection.findUnique({
+      where: { id: inspectionId },
+      include: {
+        part: true,
+        operator: { select: { username: true, name: true } },
+        session: true,
+        batch: true
+      }
+    })
+    
+    if (!inspection) {
+      return res.status(404).json({ message: 'Inspection not found' })
+    }
+    
+    // Optional: Check if user has permission to view this inspection
+    // For operator, only allow viewing own inspections
+    if (req.user.role === 'OPERATOR_QC' && inspection.operatorId !== req.user.id) {
+      return res.status(403).json({ message: 'Not authorized to view this inspection' })
+    }
+    
+    res.json({ inspection })
+  } catch (err) {
+    console.error('Get inspection detail error:', err)
+    res.status(500).json({ message: 'Failed to fetch inspection detail' })
+  }
+})
+
 
 // POST /api/operator/trigger-cv — trigger CV inspection dari dashboard
 router.post('/trigger-cv',
