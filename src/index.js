@@ -73,10 +73,12 @@ app.use(logger)
 
 // SSE endpoint - frontend subscribe ke sini untuk terima notifikasi NG
 app.get('/api/notifications/stream', auth, (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream')
-  res.setHeader('Cache-Control', 'no-cache')
-  res.setHeader('Connection', 'keep-alive')
-  res.flushHeaders()
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  })
 
   res.write('event: connected\ndata: {"message":"Listening for NG alerts"}\n\n')
   addClient(res)
