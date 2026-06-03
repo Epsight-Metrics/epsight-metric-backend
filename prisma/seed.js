@@ -1,4 +1,4 @@
-﻿require('dotenv').config()
+require('dotenv').config()
 const { PrismaClient } = require('@prisma/client')
 const { PrismaPg } = require('@prisma/adapter-pg')
 const { Pool } = require('pg')
@@ -31,7 +31,7 @@ async function main() {
   const admin = await prisma.user.findUnique({ where: { username: 'admin' } })
 
   // Seed References from referensi.json
-  const refPath = path.join(__dirname, '..', '..', 'epsight-metric-mainprogram', 'referensi.json')
+  let refPath = path.join(__dirname, "referensi.json"); if (!fs.existsSync(refPath)) { refPath = path.join(__dirname, "..", "..", "epsight-metric-mainprogram", "referensi.json") }
   if (fs.existsSync(refPath)) {
     console.log('Seeding references from referensi.json...')
     try {
