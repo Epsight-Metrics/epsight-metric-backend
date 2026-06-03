@@ -7,7 +7,6 @@ const app = express()
 const { addClient, removeClient } = require('./sse')
 const auth = require('./middleware/auth')
 const logger = require('./middleware/logger')
-const { apiLimiter } = require('./middleware/rateLimiter')
 const prisma = require('./db')
 
 // Trust Railway/proxy reverse proxy
@@ -71,7 +70,6 @@ app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 app.use(cookieParser())
 app.use(logger)
-app.use('/api/', apiLimiter)
 
 // SSE endpoint - frontend subscribe ke sini untuk terima notifikasi NG
 app.get('/api/notifications/stream', auth, (req, res) => {

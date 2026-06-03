@@ -3,7 +3,6 @@ const auth = require('../middleware/auth')
 const role = require('../middleware/role')
 const { body } = require('express-validator')
 const validate = require('../middleware/validate')
-const { cvLimiter } = require('../middleware/rateLimiter')
 const prisma = require('../db')
 const { broadcast } = require('../sse')
 const { generateInspectionHash } = require('../utils/hashGenerator')
@@ -273,7 +272,6 @@ router.post('/inspect/cv',
     }
     next()
   },
-  cvLimiter,
   [
     body('partId').isInt({ min: 1 }).withMessage('Valid part ID is required'),
     body('status').isIn(['OK', 'NG', 'NO GOOD', 'GOOD']).withMessage('Invalid status'),
