@@ -9,11 +9,14 @@ const { loginLimiter } = require('../middleware/rateLimiter')
 const auth = require('../middleware/auth')
 
 const REFRESH_TOKEN_EXPIRY_DAYS = 7
-const BCRYPT_ROUNDS = 12  // Increased from default 10 for better security
+const BCRYPT_ROUNDS = 12
+
+const isProduction = process.env.NODE_ENV === 'production'
+
 const COOKIE_OPTIONS = {
   httpOnly: true,
-  secure: true,
-  sameSite: 'none',
+  secure: isProduction,
+  sameSite: isProduction ? 'none' : 'lax',
   maxAge: REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000,
   path: '/'
 }
@@ -72,8 +75,8 @@ router.post('/login',
       res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS)
       res.cookie('accessToken', accessToken, {
         httpOnly: false,
-        secure: true,
-        sameSite: 'none',
+        secure: isProduction,
+        sameSite: isProduction ? 'none' : 'lax',
         maxAge: 15 * 60 * 1000,
         path: '/'
       })
@@ -119,8 +122,8 @@ router.post('/refresh', async (req, res) => {
     res.cookie('refreshToken', newRefreshToken, COOKIE_OPTIONS)
     res.cookie('accessToken', generateAccessToken(stored.user), {
       httpOnly: false,
-      secure: true,
-      sameSite: 'none',
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
       maxAge: 15 * 60 * 1000,
       path: '/'
     })
