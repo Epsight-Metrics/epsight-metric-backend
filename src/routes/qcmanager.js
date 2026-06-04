@@ -212,4 +212,155 @@ router.get('/export', auth, role(...ALLOWED), async (req, res) => {
   }
 })
 
+// POST /api/qcmanager/parts - Create a new part
+router.post('/parts', auth, role(...ALLOWED), async (req, res) => {
+  try {
+    const { partCode, partName, vendorName } = req.body
+
+    if (!partName || !vendorName) {
+      return res.status(400).json({ message: 'partName and vendorName are required' })
+    }
+
+    let partCodeVal = partCode
+    if (!partCodeVal || partCodeVal.trim() === '') {
+      let nextNumber = 1
+      const maxPart = await prisma.part.findFirst({
+        orderBy: { id: 'desc' }
+      })
+      if (maxPart) {
+        nextNumber = maxPart.id + 1
+      }
+      
+      let uniqueFound = false
+      while (!uniqueFound) {
+        partCodeVal = `PT-${String(nextNumber).padStart(3, '0')}`
+        const duplicate = await prisma.part.findUnique({ where: { partCode: partCodeVal } })
+        if (!duplicate) {
+          uniqueFound = true
+        } else {
+          nextNumber++
+        }
+      }
+    } else {
+      // Check if partCode already exists
+      const existing = await prisma.part.findUnique({ where: { partCode: partCodeVal } })
+      if (existing) {
+        return res.status(400).json({ message: `Part with code ${partCodeVal} already exists` })
+      }
+    }
+
+    const part = await prisma.part.create({
+      data: {
+        partCode: partCodeVal,
+        partName,
+        vendorName
+      }
+    })
+
+    res.status(201).json(part)
+  } catch (err) {
+    console.error('Create part error:', err)
+    res.status(500).json({ message: 'Failed to create part', error: err.message })
+  }
+})
+
+// PUT /api/qcmanager/parts/:id - Update a part
+router.put('/parts/:id', auth, role(...ALLOWED), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id)
+    if (isNaN(id)) {
+      return res.status(400).json({ message: 'Invalid part ID' })
+    }
+
+    const { partCode, partName, vendorName } = req.body
+
+    if (!partName || !vendorName) {
+      return res.status(400).json({ message: 'partName and vendorName are required' })
+    }
+
+    // Find the existing part
+    const existingPart = await prisma.part.findUnique({ where: { id } })
+    if (!existingPart) {
+      return res.status(404).json({ message: 'Part not found' })
+    }
+
+    let partCodeVal = partCode
+    if (!partCodeVal || partCodeVal.trim() === '') {
+      // If they cleared the partCode, keep the old one if it existed, otherwise generate.
+      partCodeVal = existingPart.partCode || ''
+      if (partCodeVal === '') {
+        let nextNumber = 1
+        const maxPart = await prisma.part.findFirst({
+          orderBy: { id: 'desc' }
+        })
+        if (maxPart) {
+          nextNumber = maxPart.id + 1
+        }
+        let uniqueFound = false
+        while (!uniqueFound) {
+          partCodeVal = `PT-${String(nextNumber).padStart(3, '0')}`
+          const duplicate = await prisma.part.findUnique({ where: { partCode: partCodeVal } })
+          if (!duplicate) {
+            uniqueFound = true
+          } else {
+            nextNumber++
+          }
+        }
+      }
+    } else if (partCodeVal !== existingPart.partCode) {
+      // Check if new partCode is already taken by another part
+      const duplicate = await prisma.part.findFirst({
+        where: {
+          partCode: partCodeVal,
+          id: { not: id }
+        }
+      })
+      if (duplicate) {
+        return res.status(400).json({ message: `Part with code ${partCodeVal} already exists` })
+      }
+    }
+
+    const updated = await prisma.part.update({
+      where: { id },
+      data: {
+        partCode: partCodeVal,
+        partName,
+        vendorName
+      }
+    })
+
+    res.json(updated)
+  } catch (err) {
+    console.error('Update part error:', err)
+    res.status(500).json({ message: 'Failed to update part', error: err.message })
+  }
+})
+
+// DELETE /api/qcmanager/parts/:id - Delete a part
+router.delete('/parts/:id', auth, role(...ALLOWED), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id)
+    if (isNaN(id)) {
+      return res.status(400).json({ message: 'Invalid part ID' })
+    }
+
+    const existing = await prisma.part.findUnique({ where: { id } })
+    if (!existing) {
+      return res.status(404).json({ message: 'Part not found' })
+    }
+
+    // Check if part has inspections
+    const count = await prisma.inspection.count({ where: { partId: id } })
+    if (count > 0) {
+      return res.status(400).json({ message: 'Cannot delete part because it already has associated inspections' })
+    }
+
+    await prisma.part.delete({ where: { id } })
+    res.json({ message: 'Part deleted successfully' })
+  } catch (err) {
+    console.error('Delete part error:', err)
+    res.status(500).json({ message: 'Failed to delete part', error: err.message })
+  }
+})
+
 module.exports = router
