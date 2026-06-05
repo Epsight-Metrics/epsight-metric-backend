@@ -1,4 +1,4 @@
-const router = require('express').Router()
+﻿const router = require('express').Router()
 const bcrypt = require('bcryptjs')
 const jwt = require('jsonwebtoken')
 const crypto = require('crypto')
@@ -13,10 +13,14 @@ const BCRYPT_ROUNDS = 12
 
 const isProduction = process.env.NODE_ENV === 'production'
 
+// COOKIE_SECURE bisa di-set manual di Railway agar cookie bekerja lintas domain
+// bahkan jika NODE_ENV masih 'development'. Set COOKIE_SECURE=true di Railway env vars.
+const useSecureCookie = isProduction || process.env.COOKIE_SECURE === 'true'
+
 const COOKIE_OPTIONS = {
   httpOnly: true,
-  secure: isProduction,
-  sameSite: isProduction ? 'none' : 'lax',
+  secure: useSecureCookie,
+  sameSite: useSecureCookie ? 'none' : 'lax',
   maxAge: REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000,
   path: '/'
 }
@@ -75,8 +79,8 @@ router.post('/login',
       res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS)
       res.cookie('accessToken', accessToken, {
         httpOnly: false,
-        secure: isProduction,
-        sameSite: isProduction ? 'none' : 'lax',
+        secure: useSecureCookie,
+        sameSite: useSecureCookie ? 'none' : 'lax',
         maxAge: 15 * 60 * 1000,
         path: '/'
       })
@@ -122,8 +126,8 @@ router.post('/refresh', async (req, res) => {
     res.cookie('refreshToken', newRefreshToken, COOKIE_OPTIONS)
     res.cookie('accessToken', generateAccessToken(stored.user), {
       httpOnly: false,
-      secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
+      secure: useSecureCookie,
+      sameSite: useSecureCookie ? 'none' : 'lax',
       maxAge: 15 * 60 * 1000,
       path: '/'
     })

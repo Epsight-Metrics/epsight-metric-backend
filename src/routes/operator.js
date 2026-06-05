@@ -234,6 +234,7 @@ router.post('/inspect/online',
         imagePath: updated.imagePath,
         timestamp: updated.timestamp,
         hash: updated.hash,
+        nilaiDimensi: inspectionDetail, // Include full measurement data for frontend
       }
 
       broadcast('inspection-update', payload)
