@@ -99,11 +99,11 @@ router.post('/',
   role(...ALLOWED),
   [
     body('name').trim().notEmpty().withMessage('Reference name is required'),
-    body('shape').isIn(['circle', 'rectangle', 'triangle', 'pentagon', 'hexagon', 'octagon']).withMessage('Invalid shape'),
+    body('shape').isIn(['circle', 'rectangle', 'triangle', 'pentagon', 'hexagon', 'octagon', 'polygon']).withMessage('Invalid shape'),
     body('vertices').isInt({ min: 0 }).withMessage('Vertices must be a positive integer'),
-    body('diameterMm').isFloat({ min: 0 }).withMessage('Diameter must be a positive number'),
-    body('widthMm').isFloat({ min: 0 }).withMessage('Width must be a positive number'),
-    body('heightMm').isFloat({ min: 0 }).withMessage('Height must be a positive number'),
+    body('diameterMm').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('Diameter must be a positive number'),
+    body('widthMm').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('Width must be a positive number'),
+    body('heightMm').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('Height must be a positive number'),
     body('toleranceMm').isFloat({ min: 0 }).withMessage('Tolerance must be a positive number'),
     body('forceOverride').optional().isBoolean(),
   ],
@@ -111,8 +111,30 @@ router.post('/',
   async (req, res) => {
     try {
       const { name, shape, vertices, diameterMm, widthMm, heightMm, toleranceMm, forceOverride } = req.body
-      const newWidth = parseFloat(widthMm)
-      const newHeight = parseFloat(heightMm)
+
+      // Validate shape-specific fields
+      if (shape === 'circle') {
+        if (!diameterMm || parseFloat(diameterMm) <= 0) {
+          return res.status(400).json({ 
+            message: 'Validation failed',
+            errors: [{ field: 'diameterMm', message: 'Diameter is required for circle shape' }]
+          })
+        }
+      } else {
+        if (!widthMm || parseFloat(widthMm) <= 0 || !heightMm || parseFloat(heightMm) <= 0) {
+          return res.status(400).json({ 
+            message: 'Validation failed',
+            errors: [
+              { field: 'widthMm', message: 'Width is required for non-circle shapes' },
+              { field: 'heightMm', message: 'Height is required for non-circle shapes' }
+            ]
+          })
+        }
+      }
+
+      const newWidth = widthMm ? parseFloat(widthMm) : null
+      const newHeight = heightMm ? parseFloat(heightMm) : null
+      const diameter = diameterMm ? parseFloat(diameterMm) : null
 
       // Check if reference with same name already exists
       const existing = await prisma.reference.findUnique({ where: { name } })
@@ -129,7 +151,7 @@ router.post('/',
           data: {
             shape,
             vertices: parseInt(vertices),
-            diameterMm: parseFloat(diameterMm),
+            diameterMm: diameter,
             widthMm: newWidth,
             heightMm: newHeight,
             toleranceMm: parseFloat(toleranceMm),
@@ -142,7 +164,7 @@ router.post('/',
             name,
             shape,
             vertices: parseInt(vertices),
-            diameterMm: parseFloat(diameterMm),
+            diameterMm: diameter,
             widthMm: newWidth,
             heightMm: newHeight,
             toleranceMm: parseFloat(toleranceMm),
