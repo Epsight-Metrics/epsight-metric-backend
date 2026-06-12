@@ -79,6 +79,14 @@ CORS_ORIGIN=https://yourdomain.com
 - `POST /api/operator/inspect/cv` - CV inspection (no auth, rate limited: 10/sec)
 - `GET /api/operator/parts` - List all parts
 
+### Reference Management (OPERATOR_QC, QUALITY_MANAGER, ADMIN)
+- `GET /api/reference` - List all references
+- `GET /api/reference/public` - Get references (public, for CV program)
+- `POST /api/reference/validate` - Validate reference before saving (checks scale consistency)
+- `POST /api/reference` - Save/update reference (with automatic scale validation)
+- `DELETE /api/reference/:name` - Delete specific reference
+- `DELETE /api/reference` - Clear all references (QUALITY_MANAGER, ADMIN only)
+
 ### QC Manager (QUALITY_MANAGER, ADMIN)
 - `GET /api/qcmanager/kpi` - Today's KPI metrics
 - `GET /api/qcmanager/trends?period=day|week|month` - Trend analysis
@@ -164,6 +172,49 @@ Part (id, partCode, partName, vendorName)
   └─ Inspection (...)
 ```
 
+## CV Reference Calibration
+
+**PENTING**: Saat menambahkan referensi baru dari kamera, pastikan:
+
+1. **Jarak kamera sama** dengan saat capture referensi sebelumnya
+2. **Kalibrasi PPM (pixel-per-mm) konsisten**
+3. **Gunakan endpoint `/api/reference/validate`** sebelum menyimpan untuk deteksi scale mismatch
+
+### Common Issues:
+
+❌ **Ukuran part berkurang setengah** → PPM kamera berbeda (jarak kamera lebih jauh)
+❌ **Ukuran part double** → PPM kamera berbeda (jarak kamera lebih dekat)
+
+### Solution:
+
+```bash
+# 1. Validasi dulu sebelum save
+POST /api/reference/validate
+{
+  "name": "Part Baru",
+  "widthMm": 15.5,
+  "heightMm": 7.5
+}
+
+# Response jika ada masalah:
+{
+  "valid": false,
+  "warnings": [{
+    "type": "SCALE_MISMATCH",
+    "message": "Width berbeda ~2x dari referensi Penghapus",
+    "ratio": "0.50"
+  }],
+  "suggestion": "Pastikan jarak kamera dan kalibrasi PPM sama"
+}
+
+# 2. Jika yakin ukuran benar, gunakan forceOverride
+POST /api/reference
+{
+  ...,
+  "forceOverride": true
+}
+```
+
 ## Best Practices Implemented
 
 1. ✅ Singleton PrismaClient (no memory leaks)
@@ -183,6 +234,7 @@ Part (id, partCode, partName, vendorName)
 15. ✅ Activity logging untuk audit
 16. ✅ Pagination pada list endpoints
 17. ✅ Database indexes untuk performance
+18. ✅ CV reference scale validation (prevent calibration mismatch)
 
 ## Development
 

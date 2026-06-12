@@ -50,6 +50,66 @@ router.get('/public', async (req, res) => {
   }
 })
 
+// POST /api/reference/validate - Validate reference before saving
+router.post('/validate',
+  auth,
+  role(...ALLOWED),
+  [
+    body('name').trim().notEmpty(),
+    body('widthMm').isFloat({ min: 0 }),
+    body('heightMm').isFloat({ min: 0 }),
+  ],
+  validate,
+  async (req, res) => {
+    try {
+      const { name, widthMm, heightMm } = req.body
+      const newWidth = parseFloat(widthMm)
+      const newHeight = parseFloat(heightMm)
+
+      // Check against existing references with similar names
+      const existing = await prisma.reference.findMany({
+        where: { name: { contains: name.split(' ')[0] } }
+      })
+
+      const warnings = []
+      existing.forEach(ref => {
+        const widthDiff = Math.abs(ref.widthMm - newWidth)
+        const heightDiff = Math.abs(ref.heightMm - newHeight)
+        const widthRatio = newWidth / ref.widthMm
+        const heightRatio = newHeight / ref.heightMm
+
+        // Check if dimensions are roughly half or double
+        if ((widthRatio > 1.8 && widthRatio < 2.2) || (widthRatio > 0.45 && widthRatio < 0.55)) {
+          warnings.push({
+            type: 'SCALE_MISMATCH',
+            message: `Width (${newWidth}mm) berbeda ~2x dari referensi "${ref.name}" (${ref.widthMm}mm). Kemungkinan kalibrasi PPM berbeda!`,
+            existingRef: ref.name,
+            ratio: widthRatio.toFixed(2)
+          })
+        }
+        
+        if ((heightRatio > 1.8 && heightRatio < 2.2) || (heightRatio > 0.45 && heightRatio < 0.55)) {
+          warnings.push({
+            type: 'SCALE_MISMATCH',
+            message: `Height (${newHeight}mm) berbeda ~2x dari referensi "${ref.name}" (${ref.heightMm}mm). Kemungkinan kalibrasi PPM berbeda!`,
+            existingRef: ref.name,
+            ratio: heightRatio.toFixed(2)
+          })
+        }
+      })
+
+      res.json({ 
+        valid: warnings.length === 0,
+        warnings,
+        suggestion: warnings.length > 0 ? 'Pastikan jarak kamera dan kalibrasi PPM sama dengan saat capture referensi sebelumnya' : null
+      })
+    } catch (err) {
+      console.error('Validate reference error:', err)
+      res.status(500).json({ message: 'Failed to validate reference' })
+    }
+  }
+)
+
 // POST /api/reference - Save new reference
 router.post('/',
   auth,
@@ -62,15 +122,38 @@ router.post('/',
     body('widthMm').isFloat({ min: 0 }).withMessage('Width must be a positive number'),
     body('heightMm').isFloat({ min: 0 }).withMessage('Height must be a positive number'),
     body('toleranceMm').isFloat({ min: 0 }).withMessage('Tolerance must be a positive number'),
+    body('forceOverride').optional().isBoolean(),
   ],
   validate,
   async (req, res) => {
     try {
-      const { name, shape, vertices, diameterMm, widthMm, heightMm, toleranceMm } = req.body
+      const { name, shape, vertices, diameterMm, widthMm, heightMm, toleranceMm, forceOverride } = req.body
+      const newWidth = parseFloat(widthMm)
+      const newHeight = parseFloat(heightMm)
 
       // Check if reference with same name already exists
       const existing = await prisma.reference.findUnique({ where: { name } })
       
+      // Validate scale consistency (unless force override)
+      if (!forceOverride && !existing) {
+        const similar = await prisma.reference.findMany()
+        for (const ref of similar) {
+          const widthRatio = newWidth / ref.widthMm
+          const heightRatio = newHeight / ref.heightMm
+          
+          if ((widthRatio > 1.8 && widthRatio < 2.2) || (widthRatio > 0.45 && widthRatio < 0.55) ||
+              (heightRatio > 1.8 && heightRatio < 2.2) || (heightRatio > 0.45 && heightRatio < 0.55)) {
+            return res.status(400).json({
+              error: 'SCALE_VALIDATION_FAILED',
+              message: `Ukuran tidak konsisten dengan referensi "${ref.name}". Ratio: ${widthRatio.toFixed(2)}x. Pastikan kalibrasi PPM dan jarak kamera sama!`,
+              existingReference: { name: ref.name, width: ref.widthMm, height: ref.heightMm },
+              newReference: { width: newWidth, height: newHeight },
+              suggestion: 'Gunakan parameter forceOverride=true untuk tetap menyimpan',
+            })
+          }
+        }
+      }
+
       let reference
       if (existing) {
         // Update existing reference
@@ -80,8 +163,8 @@ router.post('/',
             shape,
             vertices: parseInt(vertices),
             diameterMm: parseFloat(diameterMm),
-            widthMm: parseFloat(widthMm),
-            heightMm: parseFloat(heightMm),
+            widthMm: newWidth,
+            heightMm: newHeight,
             toleranceMm: parseFloat(toleranceMm),
           }
         })
@@ -93,8 +176,8 @@ router.post('/',
             shape,
             vertices: parseInt(vertices),
             diameterMm: parseFloat(diameterMm),
-            widthMm: parseFloat(widthMm),
-            heightMm: parseFloat(heightMm),
+            widthMm: newWidth,
+            heightMm: newHeight,
             toleranceMm: parseFloat(toleranceMm),
             createdBy: req.user.id,
           }
