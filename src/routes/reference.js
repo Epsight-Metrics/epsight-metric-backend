@@ -5,6 +5,21 @@ const { body } = require('express-validator')
 const validate = require('../middleware/validate')
 const prisma = require('../db')
 const { broadcast } = require('../sse')
+const multer = require('multer')
+const FormData = require('form-data')
+const axios = require('axios')
+
+// Multer config — sama dengan operator.js
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith('image/')) {
+      return cb(new Error('Only image files are allowed'))
+    }
+    cb(null, true)
+  }
+})
 
 const ALLOWED = ['OPERATOR_QC', 'QUALITY_MANAGER', 'ADMIN']
 
@@ -207,6 +222,130 @@ router.post('/',
     } catch (err) {
       console.error('Save reference error:', err)
       res.status(500).json({ message: 'Failed to save reference' })
+    }
+  }
+)
+
+// POST /api/reference/from-image — Proxy Add Reference melalui backend (SAMA PIPELINE dengan /inspect/online)
+// Sebelumnya frontend panggil CV API langsung → sekarang lewat backend agar config SELALU dari DB
+router.post('/from-image',
+  auth,
+  role(...ALLOWED),
+  upload.single('image'),
+  async (req, res) => {
+    try {
+      const { name } = req.body
+
+      if (!name || !name.trim()) {
+        return res.status(400).json({ message: 'Reference name is required' })
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ message: 'Image file is required' })
+      }
+
+      // Ambil config dari DB — SAMA PERSIS dengan /inspect/online
+      const config = await prisma.cvConfig.findFirst()
+      if (!config) {
+        return res.status(500).json({ message: 'CV configuration not found. Set calibration first.' })
+      }
+
+      const cvApiUrl = process.env.CV_API_URL
+      if (!cvApiUrl) {
+        return res.status(500).json({ message: 'CV API URL not configured' })
+      }
+
+      // Build FormData ke CV API — parameter identik dengan inspeksi
+      const formData = new FormData()
+      formData.append('file', req.file.buffer, {
+        filename: req.file.originalname,
+        contentType: req.file.mimetype
+      })
+      formData.append('name', name.trim())
+      formData.append('ppm', config.pixelPerMm.toString())
+      formData.append('tolerance_mm', config.toleranceMm.toString())
+      formData.append('contour_thresh', config.contourThresh.toString())
+      formData.append('min_area', config.contourMinArea?.toString() || '1500')
+      formData.append('min_feature_mm', config.minFeatureMm?.toString() || '5.0')
+
+      // Panggil CV API /save-reference
+      const cvResponse = await axios.post(
+        `${cvApiUrl}/save-reference`,
+        formData,
+        {
+          headers: formData.getHeaders(),
+          timeout: 25000,
+          maxContentLength: 10 * 1024 * 1024
+        }
+      )
+
+      res.json(cvResponse.data)
+    } catch (err) {
+      console.error('Save reference from image error:', err)
+      if (err.code === 'ECONNABORTED') {
+        return res.status(504).json({ message: 'CV API timeout' })
+      }
+      if (err.response) {
+        return res.status(err.response.status).json({
+          message: 'CV API error',
+          error: err.response.data
+        })
+      }
+      res.status(500).json({ message: 'Failed to process reference image' })
+    }
+  }
+)
+
+// POST /api/reference/from-stream — Proxy save-reference-from-stream melalui backend
+router.post('/from-stream',
+  auth,
+  role(...ALLOWED),
+  [
+    body('name').trim().notEmpty().withMessage('Reference name is required'),
+  ],
+  validate,
+  async (req, res) => {
+    try {
+      const { name } = req.body
+
+      // Ambil config dari DB — SAMA PERSIS dengan /inspect/online
+      const config = await prisma.cvConfig.findFirst()
+      if (!config) {
+        return res.status(500).json({ message: 'CV configuration not found. Set calibration first.' })
+      }
+
+      const cvApiUrl = process.env.CV_API_URL
+      if (!cvApiUrl) {
+        return res.status(500).json({ message: 'CV API URL not configured' })
+      }
+
+      // Panggil CV API /save-reference-from-stream
+      const cvResponse = await axios.post(
+        `${cvApiUrl}/save-reference-from-stream`,
+        {
+          name: name.trim(),
+          ppm: config.pixelPerMm,
+          tolerance_mm: config.toleranceMm,
+          contour_thresh: config.contourThresh,
+          min_area: config.contourMinArea || 1500,
+          min_feature_mm: config.minFeatureMm || 5.0
+        },
+        { timeout: 25000 }
+      )
+
+      res.json(cvResponse.data)
+    } catch (err) {
+      console.error('Save reference from stream error:', err)
+      if (err.code === 'ECONNABORTED') {
+        return res.status(504).json({ message: 'CV API timeout' })
+      }
+      if (err.response) {
+        return res.status(err.response.status).json({
+          message: 'CV API error',
+          error: err.response.data
+        })
+      }
+      res.status(500).json({ message: 'Failed to save reference from stream' })
     }
   }
 )
