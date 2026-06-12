@@ -81,43 +81,11 @@ router.post('/validate',
       const newWidth = parseFloat(widthMm)
       const newHeight = parseFloat(heightMm)
 
-      // Check against existing references with similar names
-      const existing = await prisma.reference.findMany({
-        where: { name: { contains: name.split(' ')[0] } }
-      })
+      // Validasi scale consistency dihapus — CV program kini selalu
+      // fetch kalibrasi terbaru dari backend sebelum memproses gambar.
 
-      const warnings = []
-      existing.forEach(ref => {
-        const widthDiff = Math.abs(ref.widthMm - newWidth)
-        const heightDiff = Math.abs(ref.heightMm - newHeight)
-        const widthRatio = newWidth / ref.widthMm
-        const heightRatio = newHeight / ref.heightMm
+      res.json({ valid: true, warnings: [], suggestion: null })
 
-        // Check if dimensions are roughly half or double
-        if ((widthRatio > 1.8 && widthRatio < 2.2) || (widthRatio > 0.45 && widthRatio < 0.55)) {
-          warnings.push({
-            type: 'SCALE_MISMATCH',
-            message: `Width (${newWidth}mm) berbeda ~2x dari referensi "${ref.name}" (${ref.widthMm}mm). Kemungkinan kalibrasi PPM berbeda!`,
-            existingRef: ref.name,
-            ratio: widthRatio.toFixed(2)
-          })
-        }
-        
-        if ((heightRatio > 1.8 && heightRatio < 2.2) || (heightRatio > 0.45 && heightRatio < 0.55)) {
-          warnings.push({
-            type: 'SCALE_MISMATCH',
-            message: `Height (${newHeight}mm) berbeda ~2x dari referensi "${ref.name}" (${ref.heightMm}mm). Kemungkinan kalibrasi PPM berbeda!`,
-            existingRef: ref.name,
-            ratio: heightRatio.toFixed(2)
-          })
-        }
-      })
-
-      res.json({ 
-        valid: warnings.length === 0,
-        warnings,
-        suggestion: warnings.length > 0 ? 'Pastikan jarak kamera dan kalibrasi PPM sama dengan saat capture referensi sebelumnya' : null
-      })
     } catch (err) {
       console.error('Validate reference error:', err)
       res.status(500).json({ message: 'Failed to validate reference' })
@@ -149,25 +117,9 @@ router.post('/',
       // Check if reference with same name already exists
       const existing = await prisma.reference.findUnique({ where: { name } })
       
-      // Validate scale consistency (unless force override)
-      if (!forceOverride && !existing) {
-        const similar = await prisma.reference.findMany()
-        for (const ref of similar) {
-          const widthRatio = newWidth / ref.widthMm
-          const heightRatio = newHeight / ref.heightMm
-          
-          if ((widthRatio > 1.8 && widthRatio < 2.2) || (widthRatio > 0.45 && widthRatio < 0.55) ||
-              (heightRatio > 1.8 && heightRatio < 2.2) || (heightRatio > 0.45 && heightRatio < 0.55)) {
-            return res.status(400).json({
-              error: 'SCALE_VALIDATION_FAILED',
-              message: `Ukuran tidak konsisten dengan referensi "${ref.name}". Ratio: ${widthRatio.toFixed(2)}x. Pastikan kalibrasi PPM dan jarak kamera sama!`,
-              existingReference: { name: ref.name, width: ref.widthMm, height: ref.heightMm },
-              newReference: { width: newWidth, height: newHeight },
-              suggestion: 'Gunakan parameter forceOverride=true untuk tetap menyimpan',
-            })
-          }
-        }
-      }
+      // Catatan: validasi scale consistency dihapus.
+      // CV program kini selalu fetch kalibrasi terbaru dari backend sebelum
+      // memproses gambar referensi, sehingga konsistensi PPM sudah terjamin.
 
       let reference
       if (existing) {
