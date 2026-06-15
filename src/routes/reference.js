@@ -110,7 +110,7 @@ router.post('/',
   validate,
   async (req, res) => {
     try {
-      const { name, shape, vertices, diameterMm, widthMm, heightMm, toleranceMm, forceOverride } = req.body
+      const { id, name, shape, vertices, diameterMm, widthMm, heightMm, toleranceMm, forceOverride } = req.body
 
       // Validate shape-specific fields
       if (shape === 'circle') {
@@ -136,8 +136,24 @@ router.post('/',
       const newHeight = parseFloat(heightMm) || 0
       const diameter = parseFloat(diameterMm) || 0
 
-      // Check if reference with same name already exists
-      const existing = await prisma.reference.findUnique({ where: { name } })
+      // Check if reference already exists by ID or by Name
+      let existing = null
+      if (id) {
+        existing = await prisma.reference.findUnique({ where: { id: parseInt(id) } })
+        
+        // If updating name, make sure new name is not already taken by another reference
+        if (existing && existing.name !== name.trim()) {
+          const nameConflict = await prisma.reference.findUnique({ where: { name: name.trim() } })
+          if (nameConflict) {
+            return res.status(400).json({ 
+              message: 'Validation failed',
+              errors: [{ field: 'name', message: 'Reference name already exists' }]
+            })
+          }
+        }
+      } else {
+        existing = await prisma.reference.findUnique({ where: { name: name.trim() } })
+      }
       
       // Catatan: validasi scale consistency dihapus.
       // CV program kini selalu fetch kalibrasi terbaru dari backend sebelum
@@ -147,8 +163,9 @@ router.post('/',
       if (existing) {
         // Update existing reference
         reference = await prisma.reference.update({
-          where: { name },
+          where: { id: existing.id },
           data: {
+            name: name.trim(),
             shape,
             vertices: parseInt(vertices),
             diameterMm: diameter,
