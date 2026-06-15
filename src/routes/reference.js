@@ -132,9 +132,9 @@ router.post('/',
         }
       }
 
-      const newWidth = widthMm ? parseFloat(widthMm) : null
-      const newHeight = heightMm ? parseFloat(heightMm) : null
-      const diameter = diameterMm ? parseFloat(diameterMm) : null
+      const newWidth = parseFloat(widthMm) || 0
+      const newHeight = parseFloat(heightMm) || 0
+      const diameter = parseFloat(diameterMm) || 0
 
       // Check if reference with same name already exists
       const existing = await prisma.reference.findUnique({ where: { name } })
