@@ -1,4 +1,4 @@
-﻿const router = require('express').Router()
+const router = require('express').Router()
 const bcrypt = require('bcryptjs')
 const jwt = require('jsonwebtoken')
 const crypto = require('crypto')
@@ -27,7 +27,7 @@ const COOKIE_OPTIONS = {
 
 function generateAccessToken(user) {
   return jwt.sign(
-    { id: user.id, username: user.username, role: user.role },
+    { id: user.id, username: user.username, name: user.name, role: user.role },
     process.env.JWT_SECRET,
     { expiresIn: '15m' }
   )
@@ -106,7 +106,7 @@ router.post('/refresh', async (req, res) => {
 
     const stored = await prisma.refreshToken.findUnique({
       where: { token },
-      include: { user: { select: { id: true, username: true, role: true, isActive: true } } }
+      include: { user: { select: { id: true, username: true, name: true, role: true, isActive: true } } }
     })
 
     if (!stored || stored.expiresAt < new Date() || !stored.user.isActive) {
