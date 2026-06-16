@@ -3,6 +3,19 @@ const { broadcast } = require('../sse')
 const axios = require('axios')
 const FormData = require('form-data')
 
+async function triggerCvSync() {
+  const cvApiUrl = process.env.CV_API_URL
+  if (cvApiUrl) {
+    try {
+      await axios.post(`${cvApiUrl}/sync-references`, {}, { timeout: 3000 })
+      console.log('[CV-SYNC] CV references sync triggered successfully')
+    } catch (err) {
+      console.error('[CV-SYNC] Failed to trigger CV references sync:', err.message)
+    }
+  }
+}
+
+
 async function getReferences() {
   const references = await prisma.reference.findMany({
     orderBy: { createdAt: 'desc' }
@@ -115,6 +128,8 @@ async function saveReference({ id, name, shape, vertices, diameterMm, widthMm, h
     }
   })
 
+  triggerCvSync().catch(err => console.error('[CV-SYNC] Async error:', err))
+
   return { reference, action: existing ? 'updated' : 'created' }
 }
 
@@ -199,6 +214,7 @@ async function deleteReference(name) {
       action: 'deleted',
       reference: { name }
     })
+    triggerCvSync().catch(err => console.error('[CV-SYNC] Async error:', err))
   } catch (err) {
     if (err.code === 'P2025') {
       const error = new Error('Reference not found')
@@ -215,6 +231,7 @@ async function clearAllReferences() {
   broadcast('reference-update', {
     action: 'cleared'
   })
+  triggerCvSync().catch(err => console.error('[CV-SYNC] Async error:', err))
 }
 
 module.exports = {
