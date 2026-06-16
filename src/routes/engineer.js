@@ -1,11 +1,11 @@
-﻿const router = require('express').Router()
+const router = require('express').Router()
 const auth = require('../middleware/auth')
 const role = require('../middleware/role')
 const { body } = require('express-validator')
 const validate = require('../middleware/validate')
 const prisma = require('../db')
 
-const ALLOWED = ['OPERATOR_QC', 'QUALITY_MANAGER', 'ADMIN']
+const ALLOWED = ['QUALITY_MANAGER', 'ADMIN']
 
 // GET /api/engineer/calibration
 router.get('/calibration', auth, role(...ALLOWED), async (req, res) => {

@@ -1,4 +1,4 @@
-﻿const router = require('express').Router()
+const router = require('express').Router()
 const auth = require('../middleware/auth')
 const role = require('../middleware/role')
 const { body } = require('express-validator')
@@ -59,7 +59,7 @@ router.post('/session/stop',
         return res.status(404).json({ message: 'Session not found' })
       }
       
-      if (existing.operatorId !== req.user.id && req.user.role !== 'ADMIN') {
+      if (existing.operatorId !== req.user.id) {
         return res.status(403).json({ message: 'Not authorized to stop this session' })
       }
       
@@ -146,7 +146,7 @@ router.post('/inspect/online',
       formData.append('ppm', config.pixelPerMm.toString())
       formData.append('tolerance_mm', config.toleranceMm.toString())
       formData.append('contour_thresh', config.contourThresh.toString())
-      formData.append('min_area', config.minArea?.toString() || '1500')
+      formData.append('min_area', config.contourMinArea?.toString() || '1500')
       formData.append('min_feature_mm', config.minFeatureMm?.toString() || '5.0')
       formData.append('reference_name', referenceName)
 
