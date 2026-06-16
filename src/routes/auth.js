@@ -1,20 +1,12 @@
 const router = require('express').Router()
-const bcrypt = require('bcryptjs')
-const jwt = require('jsonwebtoken')
-const crypto = require('crypto')
 const { body } = require('express-validator')
-const prisma = require('../db')
 const validate = require('../middleware/validate')
 const { loginLimiter } = require('../middleware/rateLimiter')
 const auth = require('../middleware/auth')
+const authService = require('../services/authService')
 
 const REFRESH_TOKEN_EXPIRY_DAYS = 7
-const BCRYPT_ROUNDS = 12
-
 const isProduction = process.env.NODE_ENV === 'production'
-
-// COOKIE_SECURE bisa di-set manual di Railway agar cookie bekerja lintas domain
-// bahkan jika NODE_ENV masih 'development'. Set COOKIE_SECURE=true di Railway env vars.
 const useSecureCookie = isProduction || process.env.COOKIE_SECURE === 'true'
 
 const COOKIE_OPTIONS = {
@@ -25,14 +17,6 @@ const COOKIE_OPTIONS = {
   path: '/'
 }
 
-function generateAccessToken(user) {
-  return jwt.sign(
-    { id: user.id, username: user.username, name: user.name, role: user.role },
-    process.env.JWT_SECRET,
-    { expiresIn: '15m' }
-  )
-}
-
 // POST /api/auth/login
 router.post('/login',
   loginLimiter,
@@ -41,40 +25,15 @@ router.post('/login',
     body('password').notEmpty().withMessage('Password is required'),
   ],
   validate,
-  async (req, res) => {
+  async (req, res, next) => {
     try {
       const { username, password } = req.body
-
-      const user = await prisma.user.findUnique({
-        where: { username },
-        select: { id: true, username: true, password: true, name: true, role: true, isActive: true }
-      })
-
-      if (!user || !user.isActive) return res.status(401).json({ message: 'Invalid credentials' })
-
-      const valid = await bcrypt.compare(password, user.password)
-      if (!valid) return res.status(401).json({ message: 'Invalid credentials' })
-
-      // Generate tokens
-      const accessToken = generateAccessToken(user)
-      const refreshToken = crypto.randomBytes(64).toString('hex')
-      const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000)
-
-      await prisma.$transaction([
-        prisma.refreshToken.create({ data: { token: refreshToken, userId: user.id, expiresAt } }),
-        prisma.activityLog.create({ 
-          data: { 
-            userId: user.id, 
-            action: 'LOGIN', 
-            detail: JSON.stringify({ 
-              username: user.username, 
-              ip: req.ip, 
-              userAgent: req.get('user-agent'),
-              timestamp: new Date().toISOString()
-            })
-          } 
-        }),
-      ])
+      const { accessToken, refreshToken, user } = await authService.loginUser(
+        username,
+        password,
+        req.ip,
+        req.get('user-agent')
+      )
 
       res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS)
       res.cookie('accessToken', accessToken, {
@@ -84,75 +43,47 @@ router.post('/login',
         maxAge: 15 * 60 * 1000,
         path: '/'
       })
-      res.json({ accessToken, user: { id: user.id, name: user.name, role: user.role, username: user.username } })
+      res.json({ success: true, data: { accessToken, user } })
     } catch (err) {
-      console.error('Login error:', err)
-      res.status(500).json({ message: 'Server error' })
+      next(err)
     }
   }
 )
 
 // POST /api/auth/refresh
-router.post('/refresh', async (req, res) => {
+router.post('/refresh', async (req, res, next) => {
   try {
-    console.log('Refresh request cookies:', req.cookies)
-    console.log('Refresh request headers:', req.headers.cookie)
-    
     const token = req.cookies?.refreshToken
-    if (!token) {
-      console.log('No refresh token found in cookies')
-      return res.status(401).json({ message: 'No refresh token' })
-    }
+    const { accessToken, refreshToken, user } = await authService.refreshSession(token)
 
-    const stored = await prisma.refreshToken.findUnique({
-      where: { token },
-      include: { user: { select: { id: true, username: true, name: true, role: true, isActive: true } } }
-    })
-
-    if (!stored || stored.expiresAt < new Date() || !stored.user.isActive) {
-      res.clearCookie('refreshToken', { ...COOKIE_OPTIONS, maxAge: 0 })
-      return res.status(401).json({ message: 'Invalid or expired refresh token' })
-    }
-
-    // Rotate refresh token
-    const newRefreshToken = crypto.randomBytes(64).toString('hex')
-    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000)
-
-    await prisma.$transaction([
-      prisma.refreshToken.delete({ where: { token } }),
-      prisma.refreshToken.create({ data: { token: newRefreshToken, userId: stored.userId, expiresAt } }),
-    ])
-
-    res.cookie('refreshToken', newRefreshToken, COOKIE_OPTIONS)
-    res.cookie('accessToken', generateAccessToken(stored.user), {
+    res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS)
+    res.cookie('accessToken', accessToken, {
       httpOnly: false,
       secure: useSecureCookie,
       sameSite: useSecureCookie ? 'none' : 'lax',
       maxAge: 15 * 60 * 1000,
       path: '/'
     })
-    res.json({ accessToken: generateAccessToken(stored.user) })
+    res.json({ success: true, data: { accessToken } })
   } catch (err) {
-    console.error('Refresh error:', err)
-    res.status(500).json({ message: 'Server error' })
+    if (err.status === 401) {
+      res.clearCookie('refreshToken', { ...COOKIE_OPTIONS, maxAge: 0 })
+    }
+    next(err)
   }
 })
 
 // POST /api/auth/logout
-router.post('/logout', auth, async (req, res) => {
+router.post('/logout', auth, async (req, res, next) => {
   try {
     const token = req.cookies?.refreshToken
-    await prisma.$transaction([
-      ...(token ? [prisma.refreshToken.deleteMany({ where: { token } })] : []),
-      prisma.activityLog.create({ data: { userId: req.user.id, action: 'LOGOUT', detail: `${req.user.username} logged out` } }),
-    ])
+    await authService.logoutUser(token, req.user.id, req.user.username)
 
     res.clearCookie('refreshToken', { ...COOKIE_OPTIONS, maxAge: 0 })
     res.clearCookie('accessToken', { path: '/', maxAge: 0 })
-    res.json({ message: 'Logged out successfully' })
+    res.json({ success: true, data: { message: 'Logged out successfully' } })
   } catch (err) {
-    console.error('Logout error:', err)
-    res.status(500).json({ message: 'Server error' })
+    next(err)
   }
 })
 

@@ -1,39 +1,22 @@
 const router = require('express').Router()
-const bcrypt = require('bcryptjs')
 const auth = require('../middleware/auth')
 const role = require('../middleware/role')
-const { body, query } = require('express-validator')
+const { body } = require('express-validator')
 const validate = require('../middleware/validate')
-const prisma = require('../db')
+const userService = require('../services/userService')
 
-router.get('/users', auth, role('ADMIN'), async (req, res) => {
+// GET /api/admin/users
+router.get('/users', auth, role('ADMIN'), async (req, res, next) => {
   try {
     const { name, username, role: filterRole, isActive, page = 1, limit = 50 } = req.query
-
-    const where = {
-      ...(name       && { name:     { contains: name,     mode: 'insensitive' } }),
-      ...(username   && { username: { contains: username, mode: 'insensitive' } }),
-      ...(filterRole && { role: filterRole }),
-      ...(isActive !== undefined && { isActive: isActive === 'true' }),
-    }
-
-    const [users, total] = await Promise.all([
-      prisma.user.findMany({
-        where,
-        select: { id: true, username: true, name: true, role: true, isActive: true, createdAt: true },
-        orderBy: { createdAt: 'desc' },
-        skip: (parseInt(page) - 1) * parseInt(limit),
-        take: parseInt(limit),
-      }),
-      prisma.user.count({ where }),
-    ])
-
-    res.json({ data: users, total, page: parseInt(page), limit: parseInt(limit) })
+    const result = await userService.getUsers({ name, username, role: filterRole, isActive, page, limit })
+    res.json({ success: true, data: result })
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message })
+    next(err)
   }
 })
 
+// POST /api/admin/users
 router.post('/users', 
   auth, 
   role('ADMIN'),
@@ -44,37 +27,17 @@ router.post('/users',
     body('role').isIn(['OPERATOR_QC', 'QUALITY_MANAGER', 'AUDIT', 'ADMIN']).withMessage('Invalid role'),
   ],
   validate,
-  async (req, res) => {
+  async (req, res, next) => {
     try {
-      const { username, password, name, role: userRole } = req.body
-      
-      const existing = await prisma.user.findUnique({ where: { username } })
-      if (existing) {
-        return res.status(409).json({ message: 'Username already exists' })
-      }
-      
-      const user = await prisma.user.create({
-        data: { 
-          username, 
-          password: await bcrypt.hash(password, 12), 
-          name, 
-          role: userRole 
-        },
-        select: { id: true, username: true, name: true, role: true, isActive: true, createdAt: true },
-      })
-      
-      await prisma.activityLog.create({
-        data: { userId: req.user.id, action: 'CREATE_USER', detail: `Created user ${username}` },
-      })
-      
-      res.status(201).json(user)
+      const user = await userService.createUser(req.body, req.user.id)
+      res.status(201).json({ success: true, data: user })
     } catch (err) {
-      console.error('Create user error:', err)
-      res.status(500).json({ message: 'Failed to create user' })
+      next(err)
     }
   }
 )
 
+// PUT /api/admin/users/:id
 router.put('/users/:id', 
   auth, 
   role('ADMIN'),
@@ -84,70 +47,35 @@ router.put('/users/:id',
     body('password').optional().isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
   ],
   validate,
-  async (req, res) => {
+  async (req, res, next) => {
     try {
-      const { name, role: userRole, password } = req.body
-      const data = {}
-      
-      if (name) data.name = name
-      if (userRole) data.role = userRole
-      if (password) data.password = await bcrypt.hash(password, 12)
-
-      const user = await prisma.user.update({
-        where: { id: parseInt(req.params.id) },
-        data,
-        select: { id: true, username: true, name: true, role: true, isActive: true },
-      })
-      
-      await prisma.activityLog.create({
-        data: { userId: req.user.id, action: 'UPDATE_USER', detail: `Updated user ${user.username}` },
-      })
-      
-      res.json(user)
+      const user = await userService.updateUser(req.params.id, req.body, req.user.id)
+      res.json({ success: true, data: user })
     } catch (err) {
-      console.error('Update user error:', err)
-      if (err.code === 'P2025') {
-        return res.status(404).json({ message: 'User not found' })
-      }
-      res.status(500).json({ message: 'Failed to update user' })
+      next(err)
     }
   }
 )
 
-router.delete('/users/:id', auth, role('ADMIN'), async (req, res) => {
+// DELETE /api/admin/users/:id
+router.delete('/users/:id', auth, role('ADMIN'), async (req, res, next) => {
   try {
     const { action } = req.query
-    if (action === 'delete') {
-      await prisma.user.delete({ where: { id: parseInt(req.params.id) } })
-    } else {
-      await prisma.user.update({ where: { id: parseInt(req.params.id) }, data: { isActive: false } })
-    }
-    await prisma.activityLog.create({
-      data: { userId: req.user.id, action: action === 'delete' ? 'DELETE_USER' : 'DEACTIVATE_USER', detail: `User id ${req.params.id}` },
-    })
-    res.json({ message: 'Done' })
+    const result = await userService.deleteOrDeactivateUser(req.params.id, action, req.user.id)
+    res.json({ success: true, data: result })
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message })
+    next(err)
   }
 })
 
-router.get('/logs', auth, role('ADMIN'), async (req, res) => {
+// GET /api/admin/logs
+router.get('/logs', auth, role('ADMIN'), async (req, res, next) => {
   try {
     const { userId, page = 1, limit = 50 } = req.query
-    const where = userId ? { userId: parseInt(userId) } : {}
-    const [logs, total] = await Promise.all([
-      prisma.activityLog.findMany({
-        where,
-        include: { user: { select: { username: true, name: true } } },
-        orderBy: { createdAt: 'desc' },
-        skip: (parseInt(page) - 1) * parseInt(limit),
-        take: parseInt(limit),
-      }),
-      prisma.activityLog.count({ where }),
-    ])
-    res.json({ data: logs, total, page: parseInt(page), limit: parseInt(limit) })
+    const result = await userService.getActivityLogs({ userId, page, limit })
+    res.json({ success: true, data: result })
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message })
+    next(err)
   }
 })
 

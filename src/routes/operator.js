@@ -3,12 +3,8 @@ const auth = require('../middleware/auth')
 const role = require('../middleware/role')
 const { body } = require('express-validator')
 const validate = require('../middleware/validate')
-const prisma = require('../db')
-const { broadcast } = require('../sse')
-const { generateInspectionHash } = require('../utils/hashGenerator')
+const operatorService = require('../services/operatorService')
 const multer = require('multer')
-const FormData = require('form-data')
-const axios = require('axios')
 
 // Multer config for image upload
 const upload = multer({
@@ -28,16 +24,12 @@ const ALLOWED = ['OPERATOR_QC', 'QUALITY_MANAGER', 'ADMIN']
 router.post('/session/start', 
   auth, 
   role(...ALLOWED), 
-  async (req, res) => {
+  async (req, res, next) => {
     try {
-      const sessionId = `SES-${Date.now()}-${req.user.id}`
-      const session = await prisma.session.create({
-        data: { sessionId, operatorId: req.user.id },
-      })
-      res.status(201).json(session)
+      const session = await operatorService.startSession(req.user.id)
+      res.status(201).json({ success: true, data: session })
     } catch (err) {
-      console.error('Session start error:', err)
-      res.status(500).json({ message: 'Failed to start session' })
+      next(err)
     }
   }
 )
@@ -50,53 +42,24 @@ router.post('/session/stop',
     body('sessionId').notEmpty().withMessage('Session ID is required'),
   ],
   validate,
-  async (req, res) => {
+  async (req, res, next) => {
     try {
       const { sessionId } = req.body
-      
-      const existing = await prisma.session.findUnique({ where: { sessionId } })
-      if (!existing) {
-        return res.status(404).json({ message: 'Session not found' })
-      }
-      
-      if (existing.operatorId !== req.user.id) {
-        return res.status(403).json({ message: 'Not authorized to stop this session' })
-      }
-      
-      const session = await prisma.session.update({
-        where: { sessionId },
-        data: { endedAt: new Date() },
-      })
-      
-      res.json({ session })
+      const session = await operatorService.stopSession(sessionId, req.user.id)
+      res.json({ success: true, data: { session } })
     } catch (err) {
-      console.error('Session stop error:', err)
-      res.status(500).json({ message: 'Failed to stop session' })
+      next(err)
     }
   }
 )
 
 // GET /api/operator/session
-router.get('/session', auth, role(...ALLOWED), async (req, res) => {
+router.get('/session', auth, role(...ALLOWED), async (req, res, next) => {
   try {
-    const today = new Date(); today.setHours(0, 0, 0, 0)
-
-    const [recent, activeSession] = await Promise.all([
-      prisma.inspection.findMany({
-        where:   { operatorId: req.user.id, timestamp: { gte: today } },
-        include: { part: true, session: true, batch: true },
-        orderBy: { timestamp: 'desc' },
-        take:    20,
-      }),
-      prisma.session.findFirst({
-        where:   { operatorId: req.user.id, endedAt: null },
-        orderBy: { startedAt: 'desc' },
-      }),
-    ])
-
-    res.json({ operatorId: req.user.id, date: new Date(), activeSession, recent })
+    const dashboard = await operatorService.getSessionDashboard(req.user.id)
+    res.json({ success: true, data: dashboard })
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message })
+    next(err)
   }
 })
 
@@ -105,7 +68,7 @@ router.post('/inspect/online',
   auth,
   role(...ALLOWED),
   upload.single('image'),
-  async (req, res) => {
+  async (req, res, next) => {
     try {
       const { partId, sessionId, batchId, referenceName } = req.body
 
@@ -113,142 +76,23 @@ router.post('/inspect/online',
         return res.status(400).json({ message: 'Image file is required' })
       }
 
-      // Verify session exists and is active
-      const session = await prisma.session.findUnique({
-        where: { sessionId },
-        include: { operator: true }
+      const result = await operatorService.processOnlineInspection({
+        partId,
+        sessionId,
+        batchId,
+        referenceName,
+        operatorId: req.user.id,
+        file: req.file
       })
-
-      if (!session) {
-        return res.status(404).json({ message: 'Session not found' })
-      }
-
-      if (session.endedAt) {
-        return res.status(400).json({ message: 'Session already ended' })
-      }
-
-      if (session.operatorId !== req.user.id) {
-        return res.status(403).json({ message: 'Operator mismatch with session' })
-      }
-
-      // Get CV config from database
-      const config = await prisma.cvConfig.findFirst()
-      if (!config) {
-        return res.status(500).json({ message: 'CV configuration not found' })
-      }
-
-      // Prepare FormData for CV API
-      const formData = new FormData()
-      formData.append('file', req.file.buffer, {
-        filename: req.file.originalname,
-        contentType: req.file.mimetype
-      })
-      formData.append('ppm', config.pixelPerMm.toString())
-      formData.append('tolerance_mm', config.toleranceMm.toString())
-      formData.append('contour_thresh', config.contourThresh.toString())
-      formData.append('min_area', config.contourMinArea?.toString() || '1500')
-      formData.append('min_feature_mm', config.minFeatureMm?.toString() || '5.0')
-      formData.append('reference_name', referenceName)
-
-      // Call CV API
-      const cvApiUrl = process.env.CV_API_URL
-      if (!cvApiUrl) {
-        return res.status(500).json({ message: 'CV API URL not configured' })
-      }
-
-      const cvResponse = await axios.post(
-        `${cvApiUrl}/process`,
-        formData,
-        {
-          headers: formData.getHeaders(),
-          timeout: 25000,
-          maxContentLength: 10 * 1024 * 1024
-        }
-      )
-
-      const cvResult = cvResponse.data
-
-      if (!cvResult.success) {
-        return res.status(400).json({ 
-          message: 'CV processing failed', 
-          error: cvResult.error 
-        })
-      }
-
-      // Prepare additional detail for NG cases
-      const inspectionDetail = {
-        deviations: cvResult.deviations || {},
-        referenceMatched: cvResult.reference_matched,
-        cvDetail: cvResult.detail,
-        measurements: cvResult.measurements
-      }
-
-      // Save inspection to database
-      const inspection = await prisma.inspection.create({
-        data: {
-          partId: parseInt(partId),
-          operatorId: req.user.id,
-          sessionId: sessionId,
-          batchId: batchId ? parseInt(batchId) : null,
-          shape: cvResult.measurements.shape,
-          nilaiDimensi: inspectionDetail,
-          status: cvResult.status,
-          matchedRef: cvResult.reference_matched,
-          imagePath: null, // Could save to cloud storage if needed
-        },
-        include: { 
-          part: true, 
-          operator: { select: { username: true, name: true } }, 
-          session: true, 
-          batch: true 
-        },
-      })
-
-      // Generate hash
-      const hash = generateInspectionHash(inspection)
-      
-      const updated = await prisma.inspection.update({
-        where: { id: inspection.id },
-        data: { hash },
-        include: { 
-          part: true, 
-          operator: { select: { username: true, name: true } }, 
-          session: true, 
-          batch: true 
-        },
-      })
-
-      // Broadcast to SSE
-      const payload = {
-        inspectionId: updated.id,
-        partId: updated.partId,
-        partName: updated.part.partName,
-        partCode: updated.part.partCode,
-        operatorName: updated.operator?.name,
-        sessionId: updated.sessionId,
-        batchId: updated.batchId,
-        idPart: updated.idPart,
-        shape: updated.shape,
-        status: updated.status,
-        matchedRef: updated.matchedRef,
-        imagePath: updated.imagePath,
-        timestamp: updated.timestamp,
-        hash: updated.hash,
-        nilaiDimensi: inspectionDetail, // Include full measurement data for frontend
-      }
-
-      broadcast('inspection-update', payload)
-      if (updated.status === 'NG' || updated.status === 'NO GOOD') {
-        broadcast('ng-alert', payload)
-      }
 
       res.status(201).json({ 
         success: true, 
-        inspection: updated,
-        cvResult: cvResult
+        data: { 
+          inspection: result.inspection, 
+          cvResult: result.cvResult 
+        } 
       })
     } catch (err) {
-      console.error('Online inspection error:', err)
       if (err.code === 'ECONNABORTED') {
         return res.status(504).json({ message: 'CV API timeout' })
       }
@@ -258,7 +102,7 @@ router.post('/inspect/online',
           error: err.response.data 
         })
       }
-      res.status(500).json({ message: 'Failed to process online inspection' })
+      next(err)
     }
   }
 )
@@ -284,89 +128,12 @@ router.post('/inspect/cv',
     body('matchedRef').optional().trim().escape(),
   ],
   validate,
-  async (req, res) => {
+  async (req, res, next) => {
     try {
-      const { partId, operatorId, sessionId, batchId, idPart, shape, nilaiDimensi, status, matchedRef, imagePath } = req.body
-
-      // Verify session exists and is active
-      const session = await prisma.session.findUnique({
-        where: { sessionId },
-        include: { operator: true }
-      })
-
-      if (!session) {
-        return res.status(404).json({ message: 'Session not found' })
-      }
-
-      if (session.endedAt) {
-        return res.status(400).json({ message: 'Session already ended' })
-      }
-
-      if (session.operatorId !== parseInt(operatorId)) {
-        return res.status(403).json({ message: 'Operator mismatch with session' })
-      }
-
-      const inspection = await prisma.inspection.create({
-        data: {
-          partId: parseInt(partId),
-          operatorId: parseInt(operatorId),
-          sessionId: sessionId,
-          batchId: batchId ? parseInt(batchId) : null,
-          idPart: idPart || null,
-          shape: shape || null,
-          nilaiDimensi: nilaiDimensi || null,
-          status: String(status),
-          matchedRef: matchedRef || null,
-          imagePath: imagePath || null,
-        },
-        include: { 
-          part: true, 
-          operator: { select: { username: true, name: true } }, 
-          session: true, 
-          batch: true 
-        },
-      })
-
-      // Generate hash after creation
-      const hash = generateInspectionHash(inspection)
-      
-      const updated = await prisma.inspection.update({
-        where: { id: inspection.id },
-        data: { hash },
-        include: { 
-          part: true, 
-          operator: { select: { username: true, name: true } }, 
-          session: true, 
-          batch: true 
-        },
-      })
-
-      const payload = {
-        inspectionId: updated.id,
-        partId: updated.partId,
-        partName: updated.part.partName,
-        partCode: updated.part.partCode,
-        operatorName: updated.operator?.name,
-        sessionId: updated.sessionId,
-        batchId: updated.batchId,
-        idPart: updated.idPart,
-        shape: updated.shape,
-        status: updated.status,
-        matchedRef: updated.matchedRef,
-        imagePath: updated.imagePath,
-        timestamp: updated.timestamp,
-        hash: updated.hash,
-      }
-
-      broadcast('inspection-update', payload)
-      if (status === 'NG' || status === 'NO GOOD') {
-        broadcast('ng-alert', payload)
-      }
-
-      res.status(201).json({ success: true, inspection: updated })
+      const updated = await operatorService.processCvInspection(req.body)
+      res.status(201).json({ success: true, data: { inspection: updated } })
     } catch (err) {
-      console.error('CV Inspection error:', err)
-      res.status(500).json({ message: 'Failed to create inspection' })
+      next(err)
     }
   }
 )
@@ -381,163 +148,72 @@ router.post('/inspect',
     body('batchId').optional().isInt(),
   ],
   validate,
-  async (req, res) => {
+  async (req, res, next) => {
     try {
       const { partId, sessionId, batchId, idPart, shape, nilaiDimensi, status, matchedRef, imagePath } = req.body
-
-      const inspection = await prisma.inspection.create({
-        data: {
-          partId: parseInt(partId),
-          operatorId: req.user.id,
-          sessionId: sessionId || null,
-          batchId: batchId ? parseInt(batchId) : null,
-          idPart,
-          shape,
-          nilaiDimensi,
-          status,
-          matchedRef,
-          imagePath,
-        },
-        include: { part: true, session: true, batch: true },
+      const updated = await operatorService.processManualInspection({
+        partId,
+        sessionId,
+        batchId,
+        idPart,
+        shape,
+        nilaiDimensi,
+        status,
+        matchedRef,
+        imagePath,
+        username: req.user.username,
+        operatorId: req.user.id
       })
-
-      // Generate hash after creation
-      const hash = generateInspectionHash(inspection)
-      
-      const updated = await prisma.inspection.update({
-        where: { id: inspection.id },
-        data: { hash },
-        include: { part: true, session: true, batch: true, operator: { select: { name: true, username: true } } },
-      })
-
-      const payload = {
-        inspectionId: updated.id,
-        partId: updated.partId,
-        partName: updated.part.partName,
-        partCode: updated.part.partCode,
-        sessionId: updated.sessionId,
-        batchId: updated.batchId,
-        idPart: updated.idPart,
-        shape: updated.shape,
-        status: updated.status,
-        matchedRef: updated.matchedRef,
-        imagePath: updated.imagePath,
-        operator: req.user.username,
-        timestamp: updated.timestamp,
-        hash: updated.hash,
-      }
-
-      broadcast('inspection-update', payload)
-      if (status === 'NG' || status === 'NO GOOD') {
-        broadcast('ng-alert', payload)
-      }
-
-      res.status(201).json(updated)
+      res.status(201).json({ success: true, data: updated })
     } catch (err) {
-      console.error('Manual inspection error:', err)
-      res.status(500).json({ message: 'Failed to create inspection' })
+      next(err)
     }
   }
 )
 
 // GET /api/operator/parts
-router.get('/parts', auth, role(...ALLOWED), async (req, res) => {
+router.get('/parts', auth, role(...ALLOWED), async (req, res, next) => {
   try {
-    const parts = await prisma.part.findMany({ 
-      orderBy: { partName: 'asc' },
-      select: { id: true, partCode: true, partName: true, vendorName: true }
-    })
-    res.json(parts)
+    const parts = await operatorService.getParts()
+    res.json({ success: true, data: parts })
   } catch (err) {
-    console.error('Get parts error:', err)
-    res.status(500).json({ message: 'Failed to fetch parts' })
+    next(err)
   }
 })
 
 // GET /api/operator/inspections/:id - Get single inspection detail
-router.get('/inspections/:id', auth, role(...ALLOWED), async (req, res) => {
+router.get('/inspections/:id', auth, role(...ALLOWED), async (req, res, next) => {
   try {
     const inspectionId = parseInt(req.params.id)
-    
     if (isNaN(inspectionId)) {
       return res.status(400).json({ message: 'Invalid inspection ID' })
     }
     
-    const inspection = await prisma.inspection.findUnique({
-      where: { id: inspectionId },
-      include: {
-        part: true,
-        operator: { select: { username: true, name: true } },
-        session: true,
-        batch: true
-      }
-    })
-    
-    if (!inspection) {
-      return res.status(404).json({ message: 'Inspection not found' })
-    }
-    
-    // Optional: Check if user has permission to view this inspection
-    // For operator, only allow viewing own inspections
-    if (req.user.role === 'OPERATOR_QC' && inspection.operatorId !== req.user.id) {
-      return res.status(403).json({ message: 'Not authorized to view this inspection' })
-    }
-    
-    res.json({ inspection })
+    const inspection = await operatorService.getInspectionDetail(inspectionId, req.user.id, req.user.role)
+    res.json({ success: true, data: { inspection } })
   } catch (err) {
-    console.error('Get inspection detail error:', err)
-    res.status(500).json({ message: 'Failed to fetch inspection detail' })
+    next(err)
   }
 })
 
-
 // POST /api/operator/trigger-cv — trigger CV inspection dari dashboard
-router.post('/trigger-cv',
-  auth,
-  role(...ALLOWED),
-  async (req, res) => {
-    try {
-      const { sessionId } = req.body
-      
-      // Broadcast command ke CV program yang sedang listening
-      broadcast('cv-trigger', {
-        sessionId: sessionId || null,
-        operatorId: req.user.id,
-        timestamp: new Date().toISOString()
-      })
-      
-      res.json({ success: true, message: 'CV inspection triggered' })
-    } catch (err) {
-      console.error('Trigger CV error:', err)
-      res.status(500).json({ message: 'Failed to trigger CV inspection' })
-    }
-  }
-)
-
-// GET /api/operator/active-session/public — tanpa auth, untuk CV ambil sesi aktif
-// CV query ini setiap X detik untuk sinkronisasi sessionId & operatorId
-router.get('/active-session/public', async (req, res) => {
+router.post('/trigger-cv', auth, role(...ALLOWED), async (req, res, next) => {
   try {
-    const activeSession = await prisma.session.findFirst({
-      where:   { endedAt: null },
-      orderBy: { startedAt: 'desc' },
-      include: { operator: { select: { id: true, name: true, username: true } } },
-    })
-
-    if (!activeSession) {
-      return res.json({ active: false, sessionId: null, operatorId: null, operatorName: null })
-    }
-
-    res.json({
-      active:       true,
-      sessionId:    activeSession.sessionId,
-      operatorId:   activeSession.operatorId,
-      operatorName: activeSession.operator.name,
-      startedAt:    activeSession.startedAt,
-    })
+    const { sessionId } = req.body
+    const result = await operatorService.triggerCv(sessionId, req.user.id)
+    res.json({ success: true, data: result })
   } catch (err) {
-    console.error('Active session public error:', err)
-    res.status(500).json({ message: 'Failed to fetch active session' })
+    next(err)
+  }
+})
+
+// GET /api/operator/active-session/public — tanpa auth, untuk CV ambil sesi aktif (KEEP RAW)
+router.get('/active-session/public', async (req, res, next) => {
+  try {
+    const result = await operatorService.getActiveSessionPublic()
+    res.json(result)
+  } catch (err) {
+    next(err)
   }
 })
 
@@ -547,22 +223,12 @@ router.get('/active-session/public', async (req, res) => {
 const CALIBRATION_ALLOWED = ['OPERATOR_QC', 'ADMIN']
 
 // GET /api/operator/calibration
-router.get('/calibration', auth, role(...CALIBRATION_ALLOWED), async (req, res) => {
+router.get('/calibration', auth, role(...CALIBRATION_ALLOWED), async (req, res, next) => {
   try {
-    let config = await prisma.cvConfig.findFirst({
-      orderBy: { updatedAt: 'desc' },
-      include: { updatedByUser: { select: { username: true, name: true } } },
-    })
-    if (!config) {
-      config = await prisma.cvConfig.create({
-        data: { updatedBy: req.user.id },
-        include: { updatedByUser: { select: { username: true, name: true } } },
-      })
-    }
-    res.json(config)
+    const config = await operatorService.getCalibrationConfig(req.user.id)
+    res.json({ success: true, data: config })
   } catch (err) {
-    console.error('Get calibration error:', err)
-    res.status(500).json({ message: 'Failed to fetch calibration config' })
+    next(err)
   }
 })
 
@@ -579,41 +245,23 @@ router.put('/calibration',
     body('warningDuration').isFloat({ min: 1, max: 60 }),
   ],
   validate,
-  async (req, res) => {
+  async (req, res, next) => {
     try {
-      const { pixelPerMm, toleranceMm, contourThresh, contourMinArea, minFeatureMm, roiPercent, warningDuration } = req.body
-      const existing = await prisma.cvConfig.findFirst({ orderBy: { id: 'asc' } })
-      const data = {
-        pixelPerMm: parseFloat(pixelPerMm), toleranceMm: parseFloat(toleranceMm),
-        contourThresh: parseInt(contourThresh), contourMinArea: parseInt(contourMinArea),
-        minFeatureMm: parseFloat(minFeatureMm), roiPercent,
-        warningDuration: parseFloat(warningDuration), updatedBy: req.user.id,
-      }
-      const include = { updatedByUser: { select: { username: true, name: true } } }
-      let config
-      if (existing) {
-        config = await prisma.cvConfig.update({ where: { id: existing.id }, data, include })
-      } else {
-        config = await prisma.cvConfig.create({ data, include })
-      }
-      res.json({ success: true, config })
+      const config = await operatorService.saveCalibrationConfig(req.user.id, req.body)
+      res.json({ success: true, data: { config } })
     } catch (err) {
-      console.error('Save calibration error:', err)
-      res.status(500).json({ message: 'Failed to save calibration config' })
+      next(err)
     }
   }
 )
 
-// GET /api/operator/calibration/public — tanpa auth, untuk CV program
-router.get('/calibration/public', async (req, res) => {
+// GET /api/operator/calibration/public — tanpa auth, untuk CV program (KEEP RAW)
+router.get('/calibration/public', async (req, res, next) => {
   try {
-    const config = await prisma.cvConfig.findFirst({ orderBy: { updatedAt: 'desc' } })
-    if (!config) {
-      return res.json({ pixel_per_mm: 9.28, tolerance_mm: 1.0, contour_thresh: 200, contour_min_area: 1500, min_feature_mm: 5.0, roi_percent: [0.20, 0.10, 0.80, 0.90], warning_duration: 5.0 })
-    }
-    res.json({ pixel_per_mm: config.pixelPerMm, tolerance_mm: config.toleranceMm, contour_thresh: config.contourThresh, contour_min_area: config.contourMinArea, min_feature_mm: config.minFeatureMm, roi_percent: config.roiPercent, warning_duration: config.warningDuration })
+    const result = await operatorService.getCalibrationConfigPublic()
+    res.json(result)
   } catch (err) {
-    res.status(500).json({ message: 'Failed to fetch calibration' })
+    next(err)
   }
 })
 
