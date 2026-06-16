@@ -91,7 +91,6 @@ app.use('/api/operator',  require('./routes/operator'))
 app.use('/api/admin',     require('./routes/admin'))
 app.use('/api/qcmanager', require('./routes/qcmanager'))
 app.use('/api/audit',    require('./routes/audit'))
-app.use('/api/engineer', require('./routes/engineer'))
 app.use('/api/stream',   require('./routes/stream'))
 app.use('/api/reference', require('./routes/reference'))
 
